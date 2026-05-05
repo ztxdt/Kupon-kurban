@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isSuperAdmin() {
+      return isAdmin() && (get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('role', 'operator') == 'super_admin' || request.auth.token.email == "alhabsyiadit@gmail.com");
+    }
+
+    match /config/settings {
+      allow read: if true; 
+      allow write: if isSuperAdmin();
+    }
+
+    match /counters/{counterId} {
+      allow read: if true;
+      allow write: if true; 
+    }
+
+    match /coupons/{couponId} {
+      allow get, list: if true;
+      allow create: if true; 
+      allow update, delete: if isAdmin();
+    }
+
+    match /admins/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow list: if isAdmin(); 
+      allow create: if isSignedIn(); // Validated via the login component logic (limit(1) or invitation)
+      allow update, delete: if isSuperAdmin();
+    }
+
+    match /invitations/{inviteId} {
+      allow read, list: if isAdmin() || isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    match /audit_logs/{logId} {
+      allow create: if isAdmin();
+      allow list: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
+      allow get, update: if false;
+    }
+  }
+}

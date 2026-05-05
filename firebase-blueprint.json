@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "Settings": {
+      "title": "Settings",
+      "description": "Global application settings managed by admin",
+      "type": "object",
+      "properties": {
+        "mosqueName": { "type": "string", "description": "Nama Masjid" },
+        "mosqueAddress": { "type": "string", "description": "Alamat Masjid" },
+        "maxCoupons": { "type": "integer", "description": "Batas maksimal kupon" },
+        "expiryMinutes": { "type": "integer", "description": "Durasi kupon kadaluarsa dalam menit" }
+      },
+      "required": ["mosqueName", "mosqueAddress", "maxCoupons", "expiryMinutes"]
+    },
+    "Coupon": {
+      "title": "Coupon",
+      "description": "Data kupon kurban warga",
+      "type": "object",
+      "properties": {
+        "queueNumber": { "type": "integer", "description": "Nomor Antrian" },
+        "name": { "type": "string", "description": "Nama Lengkap" },
+        "address": { "type": "string", "description": "Alamat" },
+        "status": { "type": "string", "enum": ["pending", "verified", "expired"], "description": "Status Verifikasi" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "verifiedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["queueNumber", "name", "address", "status", "createdAt", "expiresAt"]
+    },
+    "Counter": {
+      "title": "Counter",
+      "description": "Counter untuk nomor antrian",
+      "type": "object",
+      "properties": {
+        "count": { "type": "integer" }
+      },
+      "required": ["count"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin users with roles",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_admin", "operator"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "Records of administrative actions",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/config/settings": {
+      "schema": "Settings",
+      "description": "Singleton configuration document"
+    },
+    "/coupons/{couponId}": {
+      "schema": "Coupon",
+      "description": "Warga registration documents"
+    },
+    "/counters/coupons": {
+      "schema": "Counter",
+      "description": "Atomic counter for queue numbers"
+    },
+    "/admins/{userId}": {
+      "schema": "Admin",
+      "description": "Registered admins"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Audit trail for admin actions"
+    }
+  }
+}

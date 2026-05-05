@@ -1,0 +1,6 @@
+{
+  "name": "Kupon Kurban Digital",
+  "description": "Sistem pengambilan nomor antrian kurban digital yang ramah lansia dengan desain kontras tinggi.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": []
+}
