@@ -10,11 +10,18 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        request.auth.token.get('email', '') == "alhabsyiadit@gmail.com"
+      );
     }
 
     function isSuperAdmin() {
-      return isAdmin() && (get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('role', 'operator') == 'super_admin' || request.auth.token.email == "alhabsyiadit@gmail.com");
+      return isSignedIn() && (
+        request.auth.token.get('email', '') == "alhabsyiadit@gmail.com" || 
+        (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('role', 'operator') == 'super_admin')
+      );
     }
 
     match /config/settings {
@@ -23,26 +30,30 @@ service cloud.firestore {
     }
 
     match /counters/{counterId} {
-      allow read: if true;
-      allow write: if true; 
+      allow read, write: if true;
     }
 
     match /coupons/{couponId} {
-      allow get, list: if true;
+      allow read: if true;
       allow create: if true; 
       allow update, delete: if isAdmin();
     }
 
     match /admins/{userId} {
-      allow get: if isSignedIn() && request.auth.uid == userId;
-      allow list: if isAdmin(); 
-      allow create: if isSignedIn(); // Validated via the login component logic (limit(1) or invitation)
+      allow read: if isSignedIn(); 
+      allow create: if isSignedIn() && request.auth.uid == userId; 
       allow update, delete: if isSuperAdmin();
     }
 
     match /invitations/{inviteId} {
-      allow read, list: if isAdmin() || isSignedIn();
-      allow write: if isSuperAdmin();
+      allow read: if isSignedIn();
+      // Allow users to delete their own invitations when claiming them
+      allow delete: if isSignedIn() && (
+        isSuperAdmin() || 
+        resource.data.get('email', '') == request.auth.token.get('email', '') ||
+        resource.data.get('phoneNumber', '') == request.auth.token.get('phone_number', '')
+      );
+      allow create, update: if isSuperAdmin();
     }
 
     match /audit_logs/{logId} {

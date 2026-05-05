@@ -33,7 +33,8 @@ export interface CouponCounter {
 
 export interface AdminUser {
   id: string;
-  email: string;
+  email?: string;
+  phoneNumber?: string;
   role: 'super_admin' | 'operator';
   createdAt: any;
 }

@@ -43,7 +43,8 @@ import {
   Bell,
   ClipboardList,
   MapPin,
-  Map
+  Map,
+  Download
 } from 'lucide-react';
 import type { Coupon, Settings, CouponCounter, AdminUser, AdminInvitation, AuditLog } from '../types';
 import { QRScanner } from './QRScanner';
@@ -250,10 +251,11 @@ export function AdminDashboard({ onLogout }: Props) {
     setTimeout(() => setStatusMsg(null), 3000);
   };
 
-  const handleScan = async (couponId: string) => {
+  const handleScan = async (decodedText: string) => {
     setShowScanner(false);
+    
     try {
-      const docRef = doc(db, 'coupons', couponId);
+      const docRef = doc(db, 'coupons', decodedText);
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const data = docSnap.data() as Coupon;
@@ -262,13 +264,13 @@ export function AdminDashboard({ onLogout }: Props) {
           setTimeout(() => setStatusMsg(null), 4000);
           return;
         }
-        await handleVerify(couponId);
+        await handleVerify(decodedText);
       } else {
         setStatusMsg({ type: 'error', text: 'KUPON TIDAK DITEMUKAN / QR TIDAK VALID' });
         setTimeout(() => setStatusMsg(null), 4000);
       }
     } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `coupons/${couponId}`);
+      handleFirestoreError(err, OperationType.GET, `coupons/${decodedText}`);
       setStatusMsg({ type: 'error', text: 'TERJADI KESALAHAN SAAT MENGECEK KUPON' });
       setTimeout(() => setStatusMsg(null), 4000);
     }
@@ -436,6 +438,47 @@ export function AdminDashboard({ onLogout }: Props) {
     setTimeout(() => setStatusMsg(null), 3000);
   };
 
+  const downloadReport = () => {
+    const verifiedCoupons = coupons
+      .filter(c => c.status === 'verified')
+      .sort((a, b) => a.queueNumber - b.queueNumber);
+    
+    if (verifiedCoupons.length === 0) {
+      setStatusMsg({ type: 'error', text: 'TIDAK ADA KUPON TERVERIFIKASI UNTUK DILAPORKAN' });
+      setTimeout(() => setStatusMsg(null), 3000);
+      return;
+    }
+
+    const today = format(new Date(), 'dd-MM-yyyy');
+    const fileName = `laporan-kupon-terverifikasi-${today}.csv`;
+    
+    let csvContent = `LAPORAN HARIAN KUPON TERVERIFIKASI - ${today}\n`;
+    csvContent += `Total Terverifikasi: ${verifiedCoupons.length}\n\n`;
+    csvContent += `No Antrian,Nama,Alamat,Waktu Verifikasi\n`;
+    
+    verifiedCoupons.forEach(c => {
+      const vTime = c.verifiedAt ? format(c.verifiedAt.toDate(), 'HH:mm:ss') : '-';
+      // Escape commas in name and address
+      const safeName = c.name.replace(/"/g, '""');
+      const safeAddress = c.address.replace(/"/g, '""');
+      csvContent += `${c.queueNumber},"${safeName}","${safeAddress}",${vTime}\n`;
+    });
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    logAction('DOWNLOAD_LAPORAN', `Download laporan harian: ${verifiedCoupons.length} kupon`);
+    setStatusMsg({ type: 'success', text: 'LAPORAN BERHASIL DIUNDUH!' });
+    setTimeout(() => setStatusMsg(null), 3000);
+  };
+
   const stats = {
     total: coupons.length,
     verified: coupons.filter(c => c.status === 'verified').length,
@@ -488,11 +531,13 @@ export function AdminDashboard({ onLogout }: Props) {
 
       {/* Main Scanner Trigger */}
       <button 
-        onClick={() => setShowScanner(true)}
+        onClick={() => {
+          setShowScanner(true);
+        }}
         className="w-full bg-[#4CAF50] dark:bg-[#2D5A27] p-8 rounded-[40px] shadow-[0_12px_0_#2D5A27] dark:shadow-[0_12px_0_#121212] active:translate-y-2 active:shadow-none transition-all flex flex-col items-center gap-2"
       >
         <QrCode className="w-16 h-16 text-white" />
-        <span className="text-3xl font-black text-white tracking-widest uppercase">SCAN SEKARANG</span>
+        <span className="text-3xl font-black text-white tracking-widest uppercase">SCAN KUPON</span>
       </button>
 
       {/* Stats Grid */}
@@ -539,15 +584,26 @@ export function AdminDashboard({ onLogout }: Props) {
       <div className="bg-white dark:bg-[#1E1E1E] rounded-3xl shadow-xl p-6 min-h-[400px] transition-colors duration-300 border border-transparent dark:border-white/5">
         {activeTab === 'overview' && (
           <div className="space-y-8">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <h3 className="font-black text-2xl text-[#2D5A27] dark:text-[#4ADE80] uppercase tracking-tighter">STATISTIK KUPON</h3>
-              <div className="flex gap-2">
-                <span className="flex items-center gap-1 text-[8px] font-black uppercase text-gray-400">
-                  <div className="w-2 h-2 rounded-full bg-blue-500"></div> Total
-                </span>
-                <span className="flex items-center gap-1 text-[8px] font-black uppercase text-gray-400">
-                  <div className="w-2 h-2 rounded-full bg-green-500"></div> Verified
-                </span>
+              <div className="flex items-center gap-3">
+                {isSuperAdmin && (
+                  <button 
+                    onClick={downloadReport}
+                    className="flex-1 sm:flex-none bg-[#2D5A27] dark:bg-[#4ADE80] text-white dark:text-[#121212] px-4 py-2.5 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
+                  >
+                    <Download className="w-4 h-4" />
+                    UNDUH LAPORAN
+                  </button>
+                )}
+                <div className="hidden sm:flex gap-2">
+                  <span className="flex items-center gap-1 text-[8px] font-black uppercase text-gray-400">
+                    <div className="w-2 h-2 rounded-full bg-blue-500"></div> Total
+                  </span>
+                  <span className="flex items-center gap-1 text-[8px] font-black uppercase text-gray-400">
+                    <div className="w-2 h-2 rounded-full bg-green-500"></div> Verified
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -1019,7 +1075,9 @@ export function AdminDashboard({ onLogout }: Props) {
 
         {activeTab === 'admins' && (
           <div className="space-y-6">
-            <h3 className="font-black text-xl uppercase dark:text-white">Kelola Panitia (Admin)</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-xl uppercase dark:text-white">Kelola Panitia (Admin)</h3>
+            </div>
             
             <form onSubmit={handleAddAdmin} className="space-y-4 bg-gray-50 dark:bg-[#121212] p-4 rounded-2xl transition-colors duration-300">
               <div className="space-y-2">
