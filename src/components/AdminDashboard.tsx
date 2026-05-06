@@ -1459,29 +1459,38 @@ export function AdminDashboard({ onLogout }: Props) {
                 </div>
                 
                 <div className="h-[400px] w-full rounded-3xl overflow-hidden border-4 border-[#2D5A27]/10 dark:border-white/5 shadow-inner">
-                  <APIProvider apiKey={GOOGLE_MAPS_API_KEY} version="weekly">
-                    <Map
-                      defaultCenter={mapPos}
-                      defaultZoom={17}
-                      internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-                      onClick={(e) => {
-                        if (e.detail.latLng) {
-                          setMapPos({ lat: e.detail.latLng.lat, lng: e.detail.latLng.lng });
-                        }
-                      }}
-                      className="w-full h-full"
-                    >
-                      <Marker 
-                        position={mapPos} 
-                        draggable={true} 
-                        onDragEnd={(e) => {
-                          if (e.latLng) {
-                            setMapPos({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+                  {GOOGLE_MAPS_API_KEY ? (
+                    <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
+                      <Map
+                        defaultCenter={mapPos}
+                        defaultZoom={17}
+                        onClick={(e) => {
+                          if (e.detail.latLng) {
+                            setMapPos({ lat: e.detail.latLng.lat, lng: e.detail.latLng.lng });
                           }
                         }}
-                      />
-                    </Map>
-                  </APIProvider>
+                        className="w-full h-full"
+                      >
+                        <Marker 
+                          position={mapPos} 
+                          draggable={true} 
+                          onDragEnd={(e) => {
+                            if (e.latLng) {
+                              setMapPos({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+                            }
+                          }}
+                        />
+                      </Map>
+                    </APIProvider>
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-gray-50 dark:bg-[#121212] p-8 text-center space-y-4">
+                      <AlertCircle className="w-12 h-12 text-red-500" />
+                      <div>
+                        <p className="font-bold text-gray-900 dark:text-white">GOOGLE MAPS API KEY TIDAK DITEMUKAN</p>
+                        <p className="text-xs text-gray-500 uppercase mt-2">Mohon masukkan API Key di Pengaturan (GOOGLE_MAPS_PLATFORM_KEY)</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

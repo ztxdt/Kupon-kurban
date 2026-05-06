@@ -10,17 +10,19 @@ service cloud.firestore {
     }
 
     function isAdmin() {
+      let userEmail = request.auth.token.email;
       return isSignedIn() && (
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        request.auth.token.get('email', '') == "alhabsyiadit@gmail.com"
+        userEmail == "alhabsyiadit@gmail.com" ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
 
     function isSuperAdmin() {
+      let userEmail = request.auth.token.email;
       return isSignedIn() && (
-        request.auth.token.get('email', '') == "alhabsyiadit@gmail.com" || 
+        userEmail == "alhabsyiadit@gmail.com" || 
         (exists(/databases/$(database)/documents/admins/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.get('role', 'operator') == 'super_admin')
+         get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'super_admin')
       );
     }
 
@@ -31,23 +33,22 @@ service cloud.firestore {
 
     match /counters/{counterId} {
       allow read: if true;
-      // Strictly only allow incrementing during registration OR reset by Admin
-      allow write: if isAdmin() || (
-        counterId == "coupons" && (
-          (resource == null && request.resource.data.count == 1) ||
-          (resource != null && request.resource.data.count == resource.data.count + 1)
-        )
-      ); 
+      allow create: if isAdmin() || (counterId == "coupons" && request.resource.data.count == 1);
+      allow update: if isAdmin() || (
+        counterId == "coupons" && 
+        request.resource.data.count == resource.data.count + 1
+      );
     }
 
     match /coupons/{couponId} {
       allow read: if true;
-      // Rule: To prevent "korupsi" (creating fake high/low numbers), 
-      // the queueNumber MUST match the counter state after this transaction
-      allow create: if 
-        request.resource.data.queueNumber == getAfter(/databases/$(database)/documents/counters/coupons).data.count &&
-        request.resource.data.status == "pending" &&
-        request.resource.data.createdAt == request.time;
+      allow create: if isSignedIn() && (
+        isAdmin() || (
+          request.resource.data.queueNumber == getAfter(/databases/$(database)/documents/counters/coupons).data.count &&
+          request.resource.data.status == "pending" &&
+          request.resource.data.createdAt == request.time
+        )
+      );
         
       allow update: if isAdmin();
       allow delete: if isSuperAdmin();
