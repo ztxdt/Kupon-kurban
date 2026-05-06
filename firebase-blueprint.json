@@ -8,7 +8,10 @@
         "mosqueName": { "type": "string", "description": "Nama Masjid" },
         "mosqueAddress": { "type": "string", "description": "Alamat Masjid" },
         "maxCoupons": { "type": "integer", "description": "Batas maksimal kupon" },
-        "expiryMinutes": { "type": "integer", "description": "Durasi kupon kadaluarsa dalam menit" }
+        "expiryMinutes": { "type": "integer", "description": "Durasi kupon kadaluarsa dalam menit" },
+        "mosqueLat": { "type": "number", "description": "Latitude lokasi masjid" },
+        "mosqueLng": { "type": "number", "description": "Longitude lokasi masjid" },
+        "loginPassword": { "type": "string", "description": "Password akses panel admin" }
       },
       "required": ["mosqueName", "mosqueAddress", "maxCoupons", "expiryMinutes"]
     },

@@ -30,13 +30,27 @@ service cloud.firestore {
     }
 
     match /counters/{counterId} {
-      allow read, write: if true;
+      allow read: if true;
+      // Strictly only allow incrementing during registration OR reset by Admin
+      allow write: if isAdmin() || (
+        counterId == "coupons" && (
+          (resource == null && request.resource.data.count == 1) ||
+          (resource != null && request.resource.data.count == resource.data.count + 1)
+        )
+      ); 
     }
 
     match /coupons/{couponId} {
       allow read: if true;
-      allow create: if true; 
-      allow update, delete: if isAdmin();
+      // Rule: To prevent "korupsi" (creating fake high/low numbers), 
+      // the queueNumber MUST match the counter state after this transaction
+      allow create: if 
+        request.resource.data.queueNumber == getAfter(/databases/$(database)/documents/counters/coupons).data.count &&
+        request.resource.data.status == "pending" &&
+        request.resource.data.createdAt == request.time;
+        
+      allow update: if isAdmin();
+      allow delete: if isSuperAdmin();
     }
 
     match /admins/{userId} {
@@ -61,6 +75,12 @@ service cloud.firestore {
       allow list: if isSuperAdmin();
       allow delete: if isSuperAdmin();
       allow get, update: if false;
+    }
+
+    match /registrations_by_phone/{phone} {
+      allow read: if true;
+      allow create: if true; // Validation happens in coupons create
+      allow update, delete: if isAdmin();
     }
   }
 }

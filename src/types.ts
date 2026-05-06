@@ -19,6 +19,7 @@ export interface Coupon {
   id: string;
   queueNumber: number;
   name: string;
+  phone?: string;
   address: string;
   status: CouponStatus;
   createdAt: any; // Firestore Timestamp

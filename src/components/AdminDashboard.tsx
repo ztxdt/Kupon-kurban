@@ -8,6 +8,9 @@ import {
   updateDoc, 
   serverTimestamp, 
   getDoc,
+  getDocs,
+  getDocsFromServer,
+  writeBatch,
   setDoc,
   orderBy,
   deleteDoc,
@@ -26,6 +29,7 @@ import {
   Cell,
   Legend
 } from 'recharts';
+import { APIProvider, Map, Marker } from '@vis.gl/react-google-maps';
 import { 
   LayoutDashboard, 
   QrCode, 
@@ -43,7 +47,7 @@ import {
   Bell,
   ClipboardList,
   MapPin,
-  Map,
+  Map as MapIcon,
   Download
 } from 'lucide-react';
 import type { Coupon, Settings, CouponCounter, AdminUser, AdminInvitation, AuditLog } from '../types';
@@ -59,9 +63,12 @@ export function AdminDashboard({ onLogout }: Props) {
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [admins, setAdmins] = useState<AdminUser[]>([]);
   const [currentUserAdmin, setCurrentUserAdmin] = useState<AdminUser | null>(null);
-  
+
   const isCreator = auth.currentUser?.email === 'alhabsyiadit@gmail.com';
-  const isSuperAdmin = currentUserAdmin?.role === 'super_admin' || isCreator;
+  const isSuperAdmin = (admin?: AdminUser | null) => admin?.role === 'super_admin' || isCreator;
+  const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
+
+  const superAdminAccess = isSuperAdmin(currentUserAdmin);
 
   const [invitations, setInvitations] = useState<AdminInvitation[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -72,6 +79,9 @@ export function AdminDashboard({ onLogout }: Props) {
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'super_admin' | 'operator'>('operator');
+
+  // Map Selection State
+  const [mapPos, setMapPos] = useState({ lat: -6.2000, lng: 106.8166 });
 
   // List & Expired Filter State
   const [searchTerm, setSearchTerm] = useState('');
@@ -107,6 +117,27 @@ export function AdminDashboard({ onLogout }: Props) {
       handleFirestoreError(err, OperationType.UPDATE, `coupons/${couponId}`);
     }
     setTimeout(() => setStatusMsg(null), 3000);
+  };
+
+  /**
+   * Robust helper to delete documents in batches of 400
+   */
+  const deleteInChunks = async (docs: any[], onProgress?: (msg: string) => void) => {
+    if (docs.length === 0) return;
+    
+    const CHUNK_SIZE = 400;
+    const total = docs.length;
+    let processed = 0;
+
+    for (let i = 0; i < docs.length; i += CHUNK_SIZE) {
+      const chunk = docs.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      chunk.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      
+      processed += chunk.length;
+      if (onProgress) onProgress(`Membersihkan: ${processed}/${total}...`);
+    }
   };
 
   const getExpiryLabel = (expiresAt: any) => {
@@ -166,7 +197,13 @@ export function AdminDashboard({ onLogout }: Props) {
     // Listen to settings
     const settingsPath = 'config/settings';
     const unsubSettings = onSnapshot(doc(db, settingsPath), (doc) => {
-      if (doc.exists()) setSettings(doc.data() as Settings);
+      if (doc.exists()) {
+        const data = doc.data() as Settings;
+        setSettings(data);
+        if (data.mosqueLat && data.mosqueLng) {
+          setMapPos({ lat: data.mosqueLat, lng: data.mosqueLng });
+        }
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, settingsPath);
     });
@@ -190,7 +227,7 @@ export function AdminDashboard({ onLogout }: Props) {
 
   useEffect(() => {
     // Listen to audit logs (Super Admin Only)
-    if (!isSuperAdmin) {
+    if (!superAdminAccess) {
       setAuditLogs([]);
       return;
     }
@@ -204,7 +241,7 @@ export function AdminDashboard({ onLogout }: Props) {
     });
 
     return () => unsubLogs();
-  }, [isSuperAdmin]);
+  }, [superAdminAccess]);
 
   const handleLogout = async () => {
     if (!confirm('Apakah Anda yakin ingin keluar dari Dashboard?')) return;
@@ -280,7 +317,12 @@ export function AdminDashboard({ onLogout }: Props) {
     if (!confirm('Hapus data kupon ini secara permanen?')) return;
     try {
       const coupon = coupons.find(c => c.id === id);
-      await deleteDoc(doc(db, 'coupons', id));
+      const batch = writeBatch(db);
+      batch.delete(doc(db, 'coupons', id));
+      if (coupon?.phone) {
+        batch.delete(doc(db, 'registrations_by_phone', coupon.phone));
+      }
+      await batch.commit();
       await logAction('HAPUS_KUPON', `Kupon #${coupon?.queueNumber} (${coupon?.name}) dihapus`);
       setStatusMsg({ type: 'success', text: 'Kupon Berhasil Dihapus' });
     } catch (err) {
@@ -298,18 +340,18 @@ export function AdminDashboard({ onLogout }: Props) {
       mosqueAddress: (formData.get('mosqueAddress') as string) || '',
       maxCoupons: parseInt(formData.get('maxCoupons') as string) || 500,
       expiryMinutes: parseInt(formData.get('expiryMinutes') as string) || 60,
-      mosqueLat: parseFloat(formData.get('mosqueLat') as string) || -6.2000,
-      mosqueLng: parseFloat(formData.get('mosqueLng') as string) || 106.8166,
+      mosqueLat: mapPos.lat,
+      mosqueLng: mapPos.lng,
     };
-    if (isSuperAdmin && formData.get('loginPassword')) {
+    if (superAdminAccess && formData.get('loginPassword')) {
       newSettings.loginPassword = formData.get('loginPassword') as string;
-    } else if (isSuperAdmin && settings?.loginPassword) {
+    } else if (superAdminAccess && settings?.loginPassword) {
       // Keep existing password if not provided in form but already exists
       newSettings.loginPassword = settings.loginPassword;
     }
     try {
       await setDoc(doc(db, settingsPath), newSettings);
-      await logAction('PENGATURAN', 'Pengaturan masjid diperbarui');
+      await logAction('PENGATURAN', 'Pengaturan lokasi & info masjid diperbarui');
       setStatusMsg({ type: 'success', text: 'Pengaturan Disimpan!' });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, settingsPath);
@@ -317,31 +359,139 @@ export function AdminDashboard({ onLogout }: Props) {
     setTimeout(() => setStatusMsg(null), 3000);
   };
 
-  const resetAll = async () => {
-    if (!isSuperAdmin) {
-      setStatusMsg({ type: 'error', text: 'ANDA TIDAK MEMILIKI AKSES UNTUK RESET SISTEM' });
+  /**
+   * Hard reset for the entire system
+   */
+  const resetCounter = async () => {
+    if (!superAdminAccess) return;
+    if (!confirm('Reset nomor antrian kembali ke 0? (Tidak menghapus data kupon)')) return;
+    try {
+      await setDoc(doc(db, 'counters', 'coupons'), { count: 0 });
+      setCounter({ count: 0 });
+      await logAction('RESET_COUNTER', 'Nomor antrian direset ke 0');
+      setStatusMsg({ type: 'success', text: 'Nomor Antrian Berhasil Direset!' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'counters/coupons');
+    }
+    setTimeout(() => setStatusMsg(null), 3000);
+  };
+
+  const clearVerifiedCoupons = async () => {
+    if (!superAdminAccess) return;
+    if (!confirm('Hapus SEMUA kupon yang sudah VERIFIED? (Akan mengosongkan antrian dan menambah sisa kuota)')) return;
+    
+    const verifieds = coupons.filter(c => c.status === 'verified');
+    if (verifieds.length === 0) {
+      setStatusMsg({ type: 'error', text: 'Tidak ada kupon terverifikasi' });
       return;
     }
-    if (!confirm('HAPUS SEMUA DATA & MULAI DARI NOL? (Ini akan menghapus seluruh data kupon dan meriset nomor antrian ke 0)')) return;
+
+    try {
+      setStatusMsg({ type: 'success', text: `Menghapus ${verifieds.length} kupon...` });
+      
+      const batch = writeBatch(db);
+      verifieds.forEach(c => {
+        batch.delete(doc(db, 'coupons', c.id));
+        if (c.phone) {
+          batch.delete(doc(db, 'registrations_by_phone', c.phone));
+        }
+      });
+      await batch.commit();
+
+      await logAction('HAPUS_VERIFIED', `Menghapus massal ${verifieds.length} kupon terverifikasi`);
+      setStatusMsg({ type: 'success', text: 'Kupon Terverifikasi Berhasil Dibersihkan!' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'coupons');
+    }
+    setTimeout(() => setStatusMsg(null), 3000);
+  };
+
+  const clearExpiredCoupons = async () => {
+    if (!superAdminAccess) return;
+    if (!confirm('Hapus SEMUA kupon yang sudah EXPIRED?')) return;
     
-    setStatusMsg({ type: 'success', text: 'MEMBERSIHKAN DATA... MOHON TUNGGU' });
+    const now = new Date();
+    const expiredDocs = coupons.filter(c => 
+      c.status === 'expired' || (c.status === 'pending' && isExpired(c.expiresAt))
+    );
+    
+    if (expiredDocs.length === 0) {
+      setStatusMsg({ type: 'error', text: 'Tidak ada kupon expired' });
+      return;
+    }
+
+    try {
+      setStatusMsg({ type: 'success', text: `Menghapus ${expiredDocs.length} kupon...` });
+      
+      const batch = writeBatch(db);
+      expiredDocs.forEach(c => {
+        batch.delete(doc(db, 'coupons', c.id));
+        if (c.phone) {
+          batch.delete(doc(db, 'registrations_by_phone', c.phone));
+        }
+      });
+      await batch.commit();
+
+      await logAction('HAPUS_EXPIRED', `Menghapus massal ${expiredDocs.length} kupon expired`);
+      setStatusMsg({ type: 'success', text: 'Kupon Expired Berhasil Dibersihkan!' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'coupons');
+    }
+    setTimeout(() => setStatusMsg(null), 3000);
+  };
+
+  const resetAll = async () => {
+    if (!superAdminAccess) {
+      setStatusMsg({ type: 'error', text: 'TIDAK ADA IZIN RESET' });
+      return;
+    }
+    
+    if (!confirm('HAPUS TOTAL SEMUA DATA? (Kupon, Antrian, Log, & Undangan akan kembali ke NOL). Lanjutkan?')) return;
+    
+    setStatusMsg({ type: 'success', text: 'MEMULAI RESET SISTEM...' });
     
     try {
-      // 1. Reset Counter First to prevent new coupons from high numbers
-      // We use setDoc without merge to ensure it's a clean 0
+      // 1. Force clear local states first for immediate UI response
+      setCoupons([]);
+      setAuditLogs([]);
+      setInvitations([]);
+      setCounter({ count: 0 });
+
+      // 2. Clear Counter in Firestore
       await setDoc(doc(db, 'counters', 'coupons'), { count: 0 });
       
-      // 2. Delete all coupons (batch-like but simple for this scale)
-      const deletePromises = coupons.map(c => deleteDoc(doc(db, 'coupons', c.id)));
-      await Promise.all(deletePromises);
+      // 3. Fetch all collections using FROM SERVER to ensure we get everything
+      setStatusMsg({ type: 'success', text: 'MENGAMBIL DATA UNTUK DIHAPUS...' });
+      const [couponsSnap, logsSnap, invitationsSnap, phonesSnap] = await Promise.all([
+        getDocsFromServer(collection(db, 'coupons')),
+        getDocsFromServer(collection(db, 'audit_logs')),
+        getDocsFromServer(collection(db, 'invitations')),
+        getDocsFromServer(collection(db, 'registrations_by_phone'))
+      ]);
+
+      const allDocs = [
+        ...couponsSnap.docs,
+        ...logsSnap.docs,
+        ...invitationsSnap.docs,
+        ...phonesSnap.docs
+      ];
+
+      if (allDocs.length > 0) {
+        // 4. Delete everything in chunks
+        await deleteInChunks(allDocs, (msg) => setStatusMsg({ type: 'success', text: msg }));
+      }
       
-      await logAction('RESET_TOTAL', `RESET TOTAL: ${coupons.length} kupon dihapus & antrian kembali ke 0`);
+      // 5. Final force update to ensure local stats are zero
+      setCoupons([]);
       
-      setStatusMsg({ type: 'success', text: 'SISTEM BERHASIL DI-RESET TOTAL! NOMOR ANTRIAN KEMBALI KE 0' });
+      // 6. Final log entry for audit (DO NOT clear logs again after this)
+      await logAction('RESET_TOTAL', 'SISTEM TELAH DIRESET TOTAL KEMBALI KE NOL');
+      
+      setStatusMsg({ type: 'success', text: 'SISTEM BERHASIL DI-RESET TOTAL! SEMUA KEMBALI KE 0.' });
       setTimeout(() => setStatusMsg(null), 5000);
     } catch (e) {
-      console.error(e);
-      setStatusMsg({ type: 'error', text: 'GAGAL RESET SISTEM. SILAKAN COBA LAGI.' });
+      console.error('Hard reset failed:', e);
+      setStatusMsg({ type: 'error', text: 'GAGAL RESET SERVER: ' + (e instanceof Error ? e.message : 'Error Unknown') });
     }
   };
 
@@ -393,17 +543,30 @@ export function AdminDashboard({ onLogout }: Props) {
   };
 
   const clearLogs = async () => {
-    if (!isSuperAdmin) return;
+    if (!superAdminAccess) {
+      setStatusMsg({ type: 'error', text: 'ANDA TIDAK MEMILIKI IZIN' });
+      return;
+    }
     if (!confirm('HAPUS SEMUA LOG AKTIVITAS? (Data tidak dapat dikembalikan)')) return;
     
+    setStatusMsg({ type: 'success', text: 'MEMBERSIHKAN LOG... MOHON TUNGGU' });
     try {
-      const deletePromises = auditLogs.map(log => deleteDoc(doc(db, 'audit_logs', log.id)));
-      await Promise.all(deletePromises);
+      // Immediate UI update
+      setAuditLogs([]);
+
+      const logsSnap = await getDocsFromServer(collection(db, 'audit_logs'));
+      if (logsSnap.empty) {
+        setStatusMsg({ type: 'success', text: 'Log Sudah Kosong' });
+        return;
+      }
+      
+      await deleteInChunks(logsSnap.docs, (msg) => setStatusMsg({ type: 'success', text: msg }));
+      
       await logAction('CLEAR_LOGS', 'Seluruh log aktivitas telah dihapus');
       setStatusMsg({ type: 'success', text: 'Log Aktivitas Berhasil Dibersihkan' });
     } catch (err) {
       console.error('Failed to clear logs:', err);
-      setStatusMsg({ type: 'error', text: 'Gagal membersihkan log' });
+      setStatusMsg({ type: 'error', text: `Gagal membersihkan log: ${err instanceof Error ? err.message : 'Error unknown'}` });
     }
     setTimeout(() => setStatusMsg(null), 3000);
   };
@@ -438,6 +601,18 @@ export function AdminDashboard({ onLogout }: Props) {
     setTimeout(() => setStatusMsg(null), 3000);
   };
 
+  const removeAuditLogItem = async (id: string) => {
+    if (!confirm('Hapus log aktivitas ini?')) return;
+    try {
+      await deleteDoc(doc(db, 'audit_logs', id));
+      // No logAction for deleting a log to avoid infinite loop
+      setStatusMsg({ type: 'success', text: 'Log Berhasil Dihapus' });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `audit_logs/${id}`);
+    }
+    setTimeout(() => setStatusMsg(null), 3000);
+  };
+
   const downloadReport = () => {
     const verifiedCoupons = coupons
       .filter(c => c.status === 'verified')
@@ -454,14 +629,15 @@ export function AdminDashboard({ onLogout }: Props) {
     
     let csvContent = `LAPORAN HARIAN KUPON TERVERIFIKASI - ${today}\n`;
     csvContent += `Total Terverifikasi: ${verifiedCoupons.length}\n\n`;
-    csvContent += `No Antrian,Nama,Alamat,Waktu Verifikasi\n`;
+    csvContent += `No Antrian,Nama,No HP,Alamat,Waktu Verifikasi\n`;
     
     verifiedCoupons.forEach(c => {
       const vTime = c.verifiedAt ? format(c.verifiedAt.toDate(), 'HH:mm:ss') : '-';
       // Escape commas in name and address
       const safeName = c.name.replace(/"/g, '""');
+      const safePhone = (c.phone || '').replace(/"/g, '""');
       const safeAddress = c.address.replace(/"/g, '""');
-      csvContent += `${c.queueNumber},"${safeName}","${safeAddress}",${vTime}\n`;
+      csvContent += `${c.queueNumber},"${safeName}","${safePhone}","${safeAddress}",${vTime}\n`;
     });
     
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -479,11 +655,23 @@ export function AdminDashboard({ onLogout }: Props) {
     setTimeout(() => setStatusMsg(null), 3000);
   };
 
+  const isExpired = (expiresAt: any) => {
+    if (!expiresAt) return false;
+    const now = new Date();
+    const expiry = expiresAt.toDate();
+    return expiry.getTime() < now.getTime();
+  };
+
+  const usedCoupons = coupons.filter(c => 
+    c.status === 'verified' || (c.status === 'pending' && !isExpired(c.expiresAt))
+  ).length;
+
   const stats = {
     total: coupons.length,
     verified: coupons.filter(c => c.status === 'verified').length,
-    pending: coupons.filter(c => c.status === 'pending').length,
-    remaining: Math.max(0, (settings?.maxCoupons || 0) - coupons.length)
+    pending: coupons.filter(c => c.status === 'pending' && !isExpired(c.expiresAt)).length,
+    expired: coupons.filter(c => c.status === 'expired' || (c.status === 'pending' && isExpired(c.expiresAt))).length,
+    remaining: Math.max(0, (settings?.maxCoupons || 0) - usedCoupons)
   };
 
   const getPercentageColor = () => {
@@ -513,7 +701,7 @@ export function AdminDashboard({ onLogout }: Props) {
         <div className="flex items-center gap-3">
           <Database className="w-8 h-8 opacity-50" />
           <div>
-            <h1 className="font-black text-xl tracking-tight leading-none uppercase">DASHBOARD {isSuperAdmin ? 'SUPER ADMIN' : 'ADMIN'}</h1>
+            <h1 className="font-black text-xl tracking-tight leading-none uppercase">DASHBOARD {superAdminAccess ? 'SUPER ADMIN' : 'ADMIN'}</h1>
             <p className="text-[10px] uppercase font-bold text-white/50 tracking-widest">{settings?.mosqueName}</p>
           </div>
         </div>
@@ -547,7 +735,7 @@ export function AdminDashboard({ onLogout }: Props) {
            <h4 className="text-4xl font-black text-yellow-600 dark:text-yellow-500">{stats.pending}</h4>
         </div>
         <div className={`bg-white dark:bg-[#1E1E1E] p-6 rounded-3xl shadow-md border-b-8 ${getBorderColor()} transition-colors duration-300`}>
-           <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Sisa Kupon</p>
+           <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Sisa Kuota (Available)</p>
            <h4 className={`text-4xl font-black ${getPercentageColor()}`}>{stats.remaining}</h4>
         </div>
       </div>
@@ -556,7 +744,7 @@ export function AdminDashboard({ onLogout }: Props) {
       <div className="flex bg-white dark:bg-[#1E1E1E] p-2 rounded-3xl shadow-sm gap-2 overflow-x-auto transition-colors duration-300 border border-transparent dark:border-white/5">
         {(['overview', 'list', 'notifications', 'expired', 'admins', 'logs', 'settings'] as const)
           .filter(tab => {
-            if (!isSuperAdmin) {
+            if (!superAdminAccess) {
               return !['admins', 'settings', 'logs'].includes(tab);
             }
             return true;
@@ -586,24 +774,26 @@ export function AdminDashboard({ onLogout }: Props) {
           <div className="space-y-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <h3 className="font-black text-2xl text-[#2D5A27] dark:text-[#4ADE80] uppercase tracking-tighter">STATISTIK KUPON</h3>
-              <div className="flex items-center gap-3">
-                {isSuperAdmin && (
-                  <button 
-                    onClick={downloadReport}
-                    className="flex-1 sm:flex-none bg-[#2D5A27] dark:bg-[#4ADE80] text-white dark:text-[#121212] px-4 py-2.5 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
-                  >
-                    <Download className="w-4 h-4" />
-                    UNDUH LAPORAN
-                  </button>
+              <div className="flex flex-wrap items-center gap-3">
+                {superAdminAccess && (
+                  <>
+                    <button 
+                      onClick={clearVerifiedCoupons}
+                      className="bg-white dark:bg-[#1E1E1E] text-red-600 dark:text-red-400 px-4 py-2.5 rounded-2xl font-black text-[10px] uppercase border-2 border-red-100 dark:border-red-900/30 hover:bg-red-50 transition-all flex items-center gap-2"
+                      title="Hapus Kupon Selesai"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      BERSIHKAN VERIFIED
+                    </button>
+                    <button 
+                      onClick={downloadReport}
+                      className="bg-[#2D5A27] dark:bg-[#4ADE80] text-white dark:text-[#121212] px-4 py-2.5 rounded-2xl font-black text-[10px] uppercase flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-all"
+                    >
+                      <Download className="w-4 h-4" />
+                      LAPORAN
+                    </button>
+                  </>
                 )}
-                <div className="hidden sm:flex gap-2">
-                  <span className="flex items-center gap-1 text-[8px] font-black uppercase text-gray-400">
-                    <div className="w-2 h-2 rounded-full bg-blue-500"></div> Total
-                  </span>
-                  <span className="flex items-center gap-1 text-[8px] font-black uppercase text-gray-400">
-                    <div className="w-2 h-2 rounded-full bg-green-500"></div> Verified
-                  </span>
-                </div>
               </div>
             </div>
 
@@ -687,19 +877,33 @@ export function AdminDashboard({ onLogout }: Props) {
 
             {/* Existing Info Boxes */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex justify-between items-center p-4 bg-[#F5F5F0] dark:bg-[#121212] rounded-2xl transition-colors duration-300">
+              <div className="flex justify-between items-center p-4 bg-[#F5F5F0] dark:bg-[#121212] rounded-2xl transition-colors duration-300 group">
                  <div className="flex flex-col">
                    <span className="font-bold text-gray-500 dark:text-gray-400 uppercase text-[10px]">Total Terbit</span>
                    <span className="text-[8px] text-gray-400 uppercase italic">Kupon Saat Ini</span>
                  </div>
-                 <span className="font-black text-xl dark:text-white">{coupons.length}</span>
+                 <div className="flex items-center gap-2">
+                   <span className="font-black text-xl dark:text-white">{coupons.length}</span>
+                   {superAdminAccess && coupons.length > 0 && (
+                     <button onClick={clearVerifiedCoupons} className="p-1.5 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity" title="Bersihkan Kupon Selesai (Verified)">
+                       <Trash2 className="w-4 h-4" />
+                     </button>
+                   )}
+                 </div>
               </div>
-              <div className="flex justify-between items-center p-4 bg-[#F5F5F0] dark:bg-[#121212] rounded-2xl transition-colors duration-300">
+              <div className="flex justify-between items-center p-4 bg-[#F5F5F0] dark:bg-[#121212] rounded-2xl transition-colors duration-300 group">
                  <div className="flex flex-col">
                    <span className="font-bold text-gray-500 dark:text-gray-400 uppercase text-[10px]">Nomor Terakhir</span>
                    <span className="text-[8px] text-gray-400 uppercase italic">Sejarah Antrian</span>
                  </div>
-                 <span className="font-black text-xl text-blue-600 dark:text-blue-400">{counter?.count || 0}</span>
+                 <div className="flex items-center gap-2">
+                   <span className="font-black text-xl text-blue-600 dark:text-blue-400">{counter?.count || 0}</span>
+                   {superAdminAccess && (counter?.count || 0) > 0 && (
+                     <button onClick={resetCounter} className="p-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity" title="Reset Counter ke 0">
+                       <RefreshCw className="w-4 h-4" />
+                     </button>
+                   )}
+                 </div>
               </div>
             </div>
           </div>
@@ -755,9 +959,17 @@ export function AdminDashboard({ onLogout }: Props) {
                   <div key={log.id} className="p-3 bg-gray-50 dark:bg-[#121212] rounded-xl border border-gray-100 dark:border-white/10 flex flex-col gap-1 transition-colors duration-300">
                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest">
                       <span className="bg-gray-200 dark:bg-white/10 px-2 py-0.5 rounded text-gray-700 dark:text-gray-300">{log.action}</span>
-                      <span className="text-gray-400 dark:text-gray-600">
-                        {log.timestamp ? format(log.timestamp.toDate(), 'HH:mm:ss dd/MM', { locale: localeId }) : '...'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-400 dark:text-gray-600">
+                          {log.timestamp ? format(log.timestamp.toDate(), 'HH:mm:ss dd/MM', { locale: localeId }) : '...'}
+                        </span>
+                        <button 
+                          onClick={() => removeAuditLogItem(log.id)}
+                          className="text-gray-400 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                     <p className="text-sm font-bold text-gray-800 dark:text-gray-200">{log.details}</p>
                     <p className="text-[10px] text-blue-500 dark:text-blue-400 font-bold uppercase">{log.adminEmail}</p>
@@ -839,9 +1051,11 @@ export function AdminDashboard({ onLogout }: Props) {
              <div className="flex flex-col gap-4 bg-[#F5F5F0] dark:bg-[#121212] p-4 rounded-3xl transition-colors duration-300">
                 <div className="flex justify-between items-center">
                   <h3 className="font-black text-xl uppercase dark:text-white">Daftar Antrian</h3>
-                  <button onClick={resetAll} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors" title="Reset Semua Data">
-                    <Trash2 className="w-5 h-5" />
-                  </button>
+                  {superAdminAccess && (
+                    <button onClick={resetAll} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors" title="Reset Semua Data">
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  )}
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -906,53 +1120,63 @@ export function AdminDashboard({ onLogout }: Props) {
                             </p>
                           )}
                         </div>
-                        
                         <div className="flex flex-col gap-2">
-                          {c.status === 'pending' && !isActuallyExpired ? (
-                            <div className="flex gap-1">
+                          <div className="flex gap-1">
+                            {superAdminAccess && (
                               <button 
-                                onClick={() => handleVerify(c.id)}
-                                className="bg-green-600 text-white px-2 py-2 rounded-lg text-[8px] font-black uppercase shadow-sm hover:bg-green-700 transition-all"
-                                title="Set Verified"
+                                onClick={() => removeCoupon(c.id)}
+                                className="bg-red-50 text-red-600 p-2 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm flex items-center justify-center"
+                                title="Hapus Permanen"
                               >
-                                <CheckCircle className="w-3 h-3" />
+                                <Trash2 className="w-3.5 h-3.5" />
                               </button>
-                              <button 
-                                onClick={() => handleManualStatus(c.id, 'expired')}
-                                className="bg-red-600 text-white px-2 py-2 rounded-lg text-[8px] font-black uppercase shadow-sm hover:bg-red-700 transition-all"
-                                title="Set Expired"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-end gap-2">
-                              {c.status === 'verified' ? (
-                                <span className="bg-green-100 text-green-700 px-2 py-1 rounded-md text-[8px] font-black uppercase">VERIFIED</span>
-                              ) : (
-                                <span className="bg-red-100 text-red-700 px-2 py-1 rounded-md text-[8px] font-black uppercase">EXPIRED</span>
-                              )}
-                              {isSuperAdmin && (
+                            )}
+                            {c.status === 'pending' && !isActuallyExpired ? (
+                              <>
                                 <button 
-                                  onClick={async () => {
-                                    if(!confirm(`Reset status ${c.name} ke Pending?`)) return;
-                                    try {
-                                      await updateDoc(doc(db, 'coupons', c.id), { status: 'pending', verifiedAt: null });
-                                      await logAction('RESET_KUPON', `Kupon #${c.queueNumber} (${c.name}) dikembalikan ke Pending`);
-                                      setStatusMsg({ type: 'success', text: 'Status Kupon Berhasil di-Reset' });
-                                    } catch(err) {
-                                      handleFirestoreError(err, OperationType.UPDATE, `coupons/${c.id}`);
-                                    }
-                                    setTimeout(() => setStatusMsg(null), 3000);
-                                  }}
-                                  className="p-1 text-gray-400 dark:text-gray-600 hover:text-orange-500 transition-colors"
-                                  title="Reset ke Pending"
+                                  onClick={() => handleVerify(c.id)}
+                                  className="bg-green-600 text-white px-2 py-2 rounded-lg text-[8px] font-black uppercase shadow-sm hover:bg-green-700 transition-all flex items-center justify-center"
+                                  title="Set Verified"
                                 >
-                                  <RefreshCw className="w-3 h-3" />
+                                  <CheckCircle className="w-3.5 h-3.5" />
                                 </button>
-                              )}
-                            </div>
-                          )}
+                                <button 
+                                  onClick={() => handleManualStatus(c.id, 'expired')}
+                                  className="bg-orange-600 text-white px-2 py-2 rounded-lg text-[8px] font-black uppercase shadow-sm hover:bg-orange-700 transition-all flex items-center justify-center"
+                                  title="Set Expired"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            ) : (
+                              <div className="flex items-center justify-end gap-2">
+                                {c.status === 'verified' ? (
+                                  <span className="bg-green-100 text-green-700 px-2 py-1 rounded-md text-[8px] font-black uppercase">VERIFIED</span>
+                                ) : (
+                                  <span className="bg-red-100 text-red-700 px-2 py-1 rounded-md text-[8px] font-black uppercase">EXPIRED</span>
+                                )}
+                                {superAdminAccess && (
+                                  <button 
+                                    onClick={async () => {
+                                      if(!confirm(`Reset status ${c.name} ke Pending?`)) return;
+                                      try {
+                                        await updateDoc(doc(db, 'coupons', c.id), { status: 'pending', verifiedAt: null });
+                                        await logAction('RESET_KUPON', `Kupon #${c.queueNumber} (${c.name}) dikembalikan ke Pending`);
+                                        setStatusMsg({ type: 'success', text: 'Status Kupon Berhasil di-Reset' });
+                                      } catch(err) {
+                                        handleFirestoreError(err, OperationType.UPDATE, `coupons/${c.id}`);
+                                      }
+                                      setTimeout(() => setStatusMsg(null), 3000);
+                                    }}
+                                    className="p-1 text-gray-400 dark:text-gray-600 hover:text-orange-500 transition-colors"
+                                    title="Reset ke Pending"
+                                  >
+                                    <RefreshCw className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
@@ -965,7 +1189,7 @@ export function AdminDashboard({ onLogout }: Props) {
         {activeTab === 'notifications' && (
           <div className="space-y-8">
             {/* Broadcast Section */}
-            {isSuperAdmin && (
+            {superAdminAccess && (
               <div className="bg-[#2D5A27] dark:bg-[#1B3618] text-white p-6 rounded-3xl shadow-xl space-y-4 transition-colors duration-300">
                 <div className="flex items-center gap-3">
                   <div className="bg-white/20 p-2 rounded-full">
@@ -1009,20 +1233,34 @@ export function AdminDashboard({ onLogout }: Props) {
                           </div>
                           <div className="min-w-0">
                             <p className="font-bold text-sm uppercase truncate dark:text-white">{c.name}</p>
+                            {c.phone && (
+                              <p className="text-[10px] text-blue-600 dark:text-blue-400 font-black italic">📞 {c.phone}</p>
+                            )}
                             <p className={`text-[10px] font-black uppercase transition-colors duration-300 ${expiry?.color}`}>
                               Expires: {expiry?.label}
                             </p>
                           </div>
                        </div>
-                       <button 
-                         onClick={() => {
-                           const msg = prompt(`Kirim pesan untuk ${c.name}:`);
-                           if (msg) sendNotification(c.id, msg);
-                         }}
-                         className="bg-gray-100 dark:bg-[#1E1E1E] text-gray-600 dark:text-gray-400 p-3 rounded-xl hover:bg-gray-200 dark:hover:bg-white/10 transition-all transition-colors duration-300"
-                       >
-                         <Bell className="w-4 h-4" />
-                       </button>
+                       <div className="flex items-center gap-2">
+                         <button 
+                           onClick={() => {
+                             const msg = prompt(`Kirim pesan untuk ${c.name}:`);
+                             if (msg) sendNotification(c.id, msg);
+                           }}
+                           className="bg-gray-100 dark:bg-[#1E1E1E] text-gray-600 dark:text-gray-400 p-3 rounded-xl hover:bg-gray-200 dark:hover:bg-white/10 transition-all transition-colors duration-300"
+                         >
+                           <Bell className="w-4 h-4" />
+                         </button>
+                         {superAdminAccess && (
+                           <button 
+                             onClick={() => removeCoupon(c.id)}
+                             className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-xl hover:bg-red-500 hover:text-white transition-all transition-colors duration-300"
+                             title="Hapus Permanen"
+                           >
+                             <Trash2 className="w-4 h-4" />
+                           </button>
+                         )}
+                       </div>
                      </div>
                    );
                 })}
@@ -1056,7 +1294,7 @@ export function AdminDashboard({ onLogout }: Props) {
                          >
                            <Bell className="w-4 h-4" />
                          </button>
-                         {isSuperAdmin && (
+                         {superAdminAccess && (
                            <button 
                              onClick={() => removeCoupon(c.id)}
                              className="bg-white dark:bg-[#1E1E1E] text-red-600 dark:text-red-400 p-3 rounded-xl border border-red-200 dark:border-white/10 hover:bg-red-50 dark:hover:bg-white/5 transition-all transition-colors duration-300"
@@ -1120,7 +1358,7 @@ export function AdminDashboard({ onLogout }: Props) {
                     <div className="min-w-0">
                       <p className="font-bold text-sm truncate dark:text-white">{admin.email}</p>
                       <div className="flex flex-col gap-1 mt-1">
-                        {isSuperAdmin && admin.email !== auth.currentUser?.email && admin.email !== 'alhabsyiadit@gmail.com' ? (
+                        {superAdminAccess && admin.email !== auth.currentUser?.email && admin.email !== 'alhabsyiadit@gmail.com' ? (
                           <div className="space-y-1 mt-2">
                              <div className="flex items-center gap-2">
                                <div className="h-[1px] flex-1 bg-gray-100 dark:bg-white/5"></div>
@@ -1196,24 +1434,58 @@ export function AdminDashboard({ onLogout }: Props) {
                   <input name="mosqueAddress" defaultValue={settings?.mosqueAddress} className="w-full p-4 bg-gray-50 dark:bg-[#121212] rounded-xl font-bold dark:text-white border border-transparent focus:border-[#2D5A27]" />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Target Maks Kupon</label>
+                  <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Target Maks Kupon (Kuota Total)</label>
                   <input type="number" name="maxCoupons" defaultValue={settings?.maxCoupons} className="w-full p-4 bg-gray-50 dark:bg-[#121212] rounded-xl font-bold dark:text-white border border-transparent focus:border-[#2D5A27]" />
+                  <p className="text-[8px] text-gray-400 italic">Hanya kupon PENDING & VERIFIED yang memakan kuota ini. Kupon expired akan membebaskan kuota.</p>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Masa Berlaku (Menit)</label>
                   <input type="number" name="expiryMinutes" defaultValue={settings?.expiryMinutes} className="w-full p-4 bg-gray-50 dark:bg-[#121212] rounded-xl font-bold dark:text-white border border-transparent focus:border-[#2D5A27]" />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase flex items-center gap-1"><Map className="w-3 h-3" /> Latitude Masjid</label>
-                  <input type="text" name="mosqueLat" defaultValue={settings?.mosqueLat} placeholder="-6.2000" className="w-full p-4 bg-gray-50 dark:bg-[#121212] rounded-xl font-bold dark:text-white border border-transparent focus:border-blue-500" />
+              </div>
+
+              {/* MAP SELECTOR */}
+              <div className="space-y-4 pt-4 border-t dark:border-white/5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-[14px] font-black text-[#2D5A27] dark:text-[#4ADE80] uppercase flex items-center gap-2">
+                      <MapPin className="w-5 h-5" /> LOKASI MASJID DI PETA
+                    </label>
+                    <p className="text-[10px] text-gray-400 uppercase italic">Klik pada peta untuk menyesuaikan lokasi tepat masjid</p>
+                  </div>
+                  <div className="bg-gray-100 dark:bg-[#121212] p-2 rounded-xl text-[10px] font-mono text-gray-500">
+                    {mapPos.lat.toFixed(6)}, {mapPos.lng.toFixed(6)}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase flex items-center gap-1"><Map className="w-3 h-3" /> Longitude Masjid</label>
-                  <input type="text" name="mosqueLng" defaultValue={settings?.mosqueLng} placeholder="106.8166" className="w-full p-4 bg-gray-50 dark:bg-[#121212] rounded-xl font-bold dark:text-white border border-transparent focus:border-blue-500" />
+                
+                <div className="h-[400px] w-full rounded-3xl overflow-hidden border-4 border-[#2D5A27]/10 dark:border-white/5 shadow-inner">
+                  <APIProvider apiKey={GOOGLE_MAPS_API_KEY} version="weekly">
+                    <Map
+                      defaultCenter={mapPos}
+                      defaultZoom={17}
+                      internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+                      onClick={(e) => {
+                        if (e.detail.latLng) {
+                          setMapPos({ lat: e.detail.latLng.lat, lng: e.detail.latLng.lng });
+                        }
+                      }}
+                      className="w-full h-full"
+                    >
+                      <Marker 
+                        position={mapPos} 
+                        draggable={true} 
+                        onDragEnd={(e) => {
+                          if (e.latLng) {
+                            setMapPos({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+                          }
+                        }}
+                      />
+                    </Map>
+                  </APIProvider>
                 </div>
               </div>
 
-              {isSuperAdmin && (
+              {superAdminAccess && (
                 <div className="space-y-2 pt-4 border-t dark:border-white/5">
                   <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">PASSWORD AKSES PANEL ADMIN</label>
                   <input type="text" name="loginPassword" placeholder="Biarkan kosong jika tidak ingin ganti" className="w-full p-4 bg-gray-50 dark:bg-[#121212] rounded-xl font-bold dark:text-white border border-transparent focus:border-red-500" />
@@ -1224,7 +1496,7 @@ export function AdminDashboard({ onLogout }: Props) {
               <button className="w-full bg-[#2D5A27] dark:bg-[#4ADE80] text-white dark:text-[#121212] p-5 rounded-2xl font-black uppercase text-sm shadow-xl active:scale-95 transition-all">SIMPAN SEMUA PENGATURAN</button>
             </form>
 
-            {isSuperAdmin && (
+            {superAdminAccess && (
               <div className="mt-12 pt-8 border-t-2 border-dashed border-red-100 dark:border-red-900/30 space-y-4">
                 <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
                   <AlertCircle className="w-5 h-5" />
@@ -1232,45 +1504,51 @@ export function AdminDashboard({ onLogout }: Props) {
                 </div>
                 
                 <div className="bg-red-50 dark:bg-red-900/10 p-6 rounded-3xl border border-red-100 dark:border-red-900/30 space-y-6">
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-black text-red-800 dark:text-red-300 uppercase leading-tight">
-                      1. MULAI ULANG NOMOR ANTRIAN (NOMOR KEMBALI KE 1)
-                    </p>
-                    <p className="text-[8px] text-gray-500 italic uppercase">Gunakan ini jika ingin memulai batch baru tanpa menghapus data lama.</p>
-                    <button 
-                      type="button"
-                      onClick={async () => {
-                        if (!confirm('MULAI ULANG NOMOR ANTRIAN KE 1? (Pendaftar berikutnya akan mendapat nomor 1)')) return;
-                        try {
-                          await setDoc(doc(db, 'counters', 'coupons'), { count: 0 });
-                          await logAction('RESET_COUNTER', 'Nomor antrian dimulai ulang dari 1');
-                          setStatusMsg({ type: 'success', text: 'Nomor Antrian Berhasil Dimulai Ulang dari 1!' });
-                        } catch (err) {
-                          setStatusMsg({ type: 'error', text: 'Gagal meriset antrian' });
-                        }
-                        setTimeout(() => setStatusMsg(null), 3000);
-                      }}
-                      className="w-full bg-orange-100 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 p-4 rounded-xl font-black uppercase text-[10px] border border-orange-200 dark:border-orange-900/30 active:scale-95 transition-all flex items-center justify-center gap-2"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                      MULAI NOMOR DARI 1 LAGI
-                    </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                       <p className="text-[10px] font-black text-red-800 dark:text-red-300 uppercase">1. Bersihkan Data</p>
+                       <button 
+                         type="button"
+                         onClick={clearVerifiedCoupons}
+                         className="w-full bg-white dark:bg-[#1E1E1E] text-red-600 p-3 rounded-xl font-bold uppercase text-[9px] border border-red-100 shadow-sm transition-all flex items-center justify-center gap-2"
+                       >
+                         Hapus Kupon Verified
+                       </button>
+                       <button 
+                         type="button"
+                         onClick={clearExpiredCoupons}
+                         className="w-full bg-white dark:bg-[#1E1E1E] text-orange-600 p-3 rounded-xl font-bold uppercase text-[9px] border border-orange-100 shadow-sm transition-all flex items-center justify-center gap-2"
+                       >
+                         Hapus Kupon Expired
+                       </button>
+                    </div>
+
+                    <div className="space-y-2">
+                       <p className="text-[10px] font-black text-red-800 dark:text-red-300 uppercase">2. Reset Antrian</p>
+                       <button 
+                         type="button"
+                         onClick={resetCounter}
+                         className="w-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 p-3 rounded-xl font-bold uppercase text-[9px] border border-blue-100 shadow-sm transition-all flex items-center justify-center gap-2"
+                       >
+                         <RefreshCw className="w-3 h-3" /> Reset Nomor ke 0
+                       </button>
+                    </div>
                   </div>
 
                   <div className="h-[1px] bg-red-100 dark:bg-red-900/30"></div>
 
                   <div className="space-y-2">
                     <p className="text-[10px] font-black text-red-800 dark:text-red-300 uppercase leading-tight">
-                      2. HAPUS SEMUA DATA (RESET TOTAL)
+                      3. RESET TOTAL (HAPUS SEMUA & KEMBALI KE 0)
                     </p>
                     <p className="text-[8px] text-gray-500 italic">Menghapus SELURUH data kupon & log dari database secara permanen.</p>
                     <button 
                       type="button"
                       onClick={resetAll}
-                      className="w-full bg-red-600 dark:bg-red-700 text-white p-4 rounded-xl font-black uppercase text-[10px] shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                      className="w-full bg-red-600 dark:bg-red-700 text-white p-4 rounded-xl font-black uppercase text-xs shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
                     >
-                      <Trash2 className="w-4 h-4" />
-                      HAPUS & RESET SELURUH DATA SISTEM
+                      <Trash2 className="w-5 h-5" />
+                      RESET TOTAL SISTEM
                     </button>
                   </div>
                 </div>

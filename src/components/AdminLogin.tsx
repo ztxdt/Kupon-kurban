@@ -95,8 +95,20 @@ export function AdminLogin({ onLoginSuccess, onBack }: Props) {
       const result = await signInWithPopup(auth, provider);
       await checkAdminStatus(result.user.uid, result.user.email);
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Gagal login Google.');
+      console.error('Firebase Auth Error:', err);
+      
+      let msg = 'Gagal login Google.';
+      if (err.code === 'auth/unauthorized-domain') {
+        msg = 'DOMAIN TIDAK TEROTORISASI: Mohon tambahkan domain ini ke list "Authorized domains" di Firebase Console (Authentication > Settings).';
+      } else if (err.code === 'auth/popup-blocked') {
+        msg = 'POPUP DIBLOKIR: Mohon izinkan popup untuk website ini di browser Anda.';
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        msg = 'Login dibatalkan oleh pengguna.';
+      } else {
+        msg = `${err.message} (${err.code})`;
+      }
+      
+      setError(msg);
     } finally {
       setLoading(false);
     }

@@ -78,24 +78,6 @@ export function CouponDisplay({ couponId }: Props) {
 
           const isNear = distance <= 50; // 50 meters
           setIsNearMosque(isNear);
-
-          // Auto verify if near mosque AND nearing expiry (within 30 mins)
-          if (isNear) {
-            const now = new Date();
-            const diffMins = (expiresAtMs - now.getTime()) / 60000;
-
-            if (diffMins > 0 && diffMins <= 30) {
-              try {
-                await updateDoc(doc(db, 'coupons', couponId), {
-                  status: 'verified',
-                  verifiedAt: serverTimestamp(),
-                  notification: '✅ VERIFIKASI OTOMATIS: Anda telah berada di lokasi!'
-                });
-              } catch (err) {
-                console.error('Auto-verify failed:', err);
-              }
-            }
-          }
         },
         (err) => {
           console.warn('Geolocation error:', err.message);
@@ -257,6 +239,17 @@ export function CouponDisplay({ couponId }: Props) {
       </div>
 
       <div className="flex flex-col gap-3">
+        {settings?.mosqueLat && settings?.mosqueLng && (
+          <a 
+            href={`https://www.google.com/maps/dir/?api=1&destination=${settings.mosqueLat},${settings.mosqueLng}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full bg-[#2D5A27] dark:bg-[#4ADE80] text-white dark:text-[#121212] p-5 rounded-3xl font-black text-xl flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all uppercase tracking-tight"
+          >
+            <Map className="w-6 h-6" />
+            Petunjuk Jalan Ke Masjid
+          </a>
+        )}
         <div className="flex items-center gap-3 text-gray-600 dark:text-gray-300 bg-white dark:bg-[#1E1E1E] p-4 rounded-2xl shadow-md transition-colors duration-300 border border-gray-100 dark:border-white/5">
            <MapPin className="w-6 h-6 text-[#2D5A27] dark:text-[#4ADE80]" />
            <p className="font-bold text-sm tracking-tight leading-tight">

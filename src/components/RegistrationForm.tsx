@@ -10,94 +10,129 @@ interface Props {
 
 export function RegistrationForm({ onSuccess }: Props) {
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [counter, setCounter] = useState<{ count: number } | null>(null);
   const [error, setError] = useState('');
 
-  const [couponsCount, setCouponsCount] = useState(0);
-
   useEffect(() => {
-    const fetchSettings = async () => {
-      const docPath = 'config/settings';
-      try {
-        const docRef = doc(db, docPath);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setSettings(docSnap.data() as SettingsType);
-        } else {
-          // Default values if document does not exist yet
-          setSettings({
-            mosqueName: "Masjid Baiturrahman",
-            mosqueAddress: "Alamat belum diatur",
-            maxCoupons: 500,
-            expiryMinutes: 60
-          });
-        }
-      } catch (err: any) {
-        console.warn('Initial settings fetch failed (offline?):', err.message);
-        // Fallback or initial default
+    // Listen to settings for real-time updates (mosque name, max coupons, etc)
+    const settingsPath = 'config/settings';
+    const unsubSettings = onSnapshot(doc(db, settingsPath), (snapshot) => {
+      if (snapshot.exists()) {
+        setSettings(snapshot.data() as SettingsType);
+      } else {
+        // Default values if document does not exist yet
         setSettings({
           mosqueName: "Masjid Baiturrahman",
-          mosqueAddress: "Mode Offline / Hubungi Panitia",
+          mosqueAddress: "Alamat belum diatur",
           maxCoupons: 500,
           expiryMinutes: 60
         });
       }
-    };
-    fetchSettings();
+    }, (error) => {
+      console.warn('Settings listener failed:', error);
+      // Fallback or initial default
+      setSettings(prev => prev || {
+        mosqueName: "Masjid Baiturrahman",
+        mosqueAddress: "Mode Offline / Hubungi Panitia",
+        maxCoupons: 500,
+        expiryMinutes: 60
+      });
+    });
 
     // Listen to counter for real-time queue number preview if needed
     const counterPath = 'counters/coupons';
-    const unsubCounter = onSnapshot(doc(db, counterPath), (doc) => {
-      if (doc.exists()) setCounter(doc.data() as { count: number });
-    });
-
-    // Listen to all coupons to count active ones (Better for "Out of Stock" logic)
-    const unsubCoupons = onSnapshot(collection(db, 'coupons'), (snap) => {
-      setCouponsCount(snap.size);
+    const unsubCounter = onSnapshot(doc(db, counterPath), (snapshot) => {
+      if (snapshot.exists()) {
+        setCounter(snapshot.data() as { count: number });
+      } else {
+        // If document is deleted or doesn't exist, reset local counter state to 0
+        setCounter({ count: 0 });
+      }
     });
 
     return () => {
+      unsubSettings();
       unsubCounter();
-      unsubCoupons();
     };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !address) {
-      setError('Mohon isi Nama dan Alamat Anda');
+    if (!name || !address || !phone) {
+      setError('Mohon isi Nama, No. HP, dan Alamat Anda');
+      return;
+    }
+    
+    // Basic phone validation
+    const phoneClean = phone.replace(/[^0-9]/g, '');
+    if (phoneClean.length < 10) {
+      setError('Nomor HP tidak valid (Minimal 10 digit)');
       return;
     }
     setError('');
     
-    // Check limit before processing - Use current count from collection size
-    if (settings && couponsCount >= settings.maxCoupons) {
-      setError('MOHON MAAF KUPON TELAH HABIS APABILA ADA KESALAHAN HUBUNGI PANITIA SETEMPAT dan segera konfirmasi');
+    // Check if user already has a coupon in localStorage (simple guard)
+    const existingId = localStorage.getItem('my_coupon_id');
+    if (existingId) {
+      setError('ANDA SUDAH MEMILIKI KUPON AKTIF. HARAP SELESAIKAN ANTRIAN ANDA.');
       return;
     }
 
-    const couponsPath = 'coupons';
+    setLoading(true);
+    const settingsPath = 'config/settings';
     const counterPath = 'counters/coupons';
     try {
       const counterRef = doc(db, counterPath);
+      const settingsRef = doc(db, settingsPath);
+
+      const phoneRef = doc(db, 'registrations_by_phone', phoneClean);
+
       const couponId = await runTransaction(db, async (transaction) => {
+        const settingsDoc = await transaction.get(settingsRef);
         const counterDoc = await transaction.get(counterRef);
-        let newCount = 1;
-        if (counterDoc.exists()) {
-          newCount = counterDoc.data().count + 1;
+        const phoneDoc = await transaction.get(phoneRef);
+
+        // CHECK IF PHONE ALREADY REGISTERED
+        if (phoneDoc.exists()) {
+          // If the doc exists, it means they are currently registered or were recently.
+          // In this simple system, we just block it.
+          throw new Error('DUPLICATE_PHONE');
         }
+        
+        const currentMax = settingsDoc.exists() ? settingsDoc.data().maxCoupons : 500;
+        let currentCount = 0;
+        if (counterDoc.exists()) {
+          currentCount = counterDoc.data().count;
+        }
+
+        // STRIKT LIMIT CHECK INSIDE TRANSACTION
+        if (currentCount >= currentMax) {
+          throw new Error('LIMIT_REACHED');
+        }
+
+        const newCount = currentCount + 1;
         transaction.set(counterRef, { count: newCount }, { merge: true });
 
         const expiryDate = new Date();
-        expiryDate.setMinutes(expiryDate.getMinutes() + (settings?.expiryMinutes || 60));
+        expiryDate.setMinutes(expiryDate.getMinutes() + (settingsDoc.exists() ? settingsDoc.data().expiryMinutes : 60));
 
         const newCouponRef = doc(collection(db, 'coupons'));
+        
+        // Register the phone
+        transaction.set(phoneRef, { 
+          couponId: newCouponRef.id, 
+          queueNumber: newCount,
+          createdAt: serverTimestamp() 
+        });
+
         transaction.set(newCouponRef, {
           queueNumber: newCount,
           name,
+          phone: phoneClean,
           address,
           status: 'pending',
           createdAt: serverTimestamp(),
@@ -107,16 +142,22 @@ export function RegistrationForm({ onSuccess }: Props) {
       });
 
       onSuccess(couponId);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      handleFirestoreError(err, OperationType.WRITE, counterPath);
-      setError('Gagal mengambil kupon. Silakan coba lagi.');
+      if (err.message === 'LIMIT_REACHED') {
+        setError('MAAF, KUPON BARU SAJA HABIS! HUBUNGI PANITIA.');
+      } else if (err.message === 'DUPLICATE_PHONE') {
+        setError('NOMOR HP INI SUDAH TERDAFTAR! SATU HP HANYA UNTUK SATU KUPON.');
+      } else {
+        handleFirestoreError(err, OperationType.WRITE, counterPath);
+        setError('Gagal mengambil kupon. Silakan coba lagi.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const isOutOfStock = settings && couponsCount >= settings.maxCoupons;
+  const isOutOfStock = settings && counter && counter.count >= settings.maxCoupons;
 
   return (
     <div id="registration-form-container" className="flex flex-col gap-6 pt-10">
@@ -155,6 +196,20 @@ export function RegistrationForm({ onSuccess }: Props) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full bg-[#F5F5F0] dark:bg-[#121212] border-4 border-[#2D5A27]/20 dark:border-[#4ADE80]/20 rounded-2xl p-6 text-2xl font-black focus:border-[#2D5A27] dark:focus:border-[#4ADE80] focus:ring-0 outline-none transition-all placeholder:text-[#2D5A27]/30 dark:placeholder:text-[#4ADE80]/30 uppercase text-[#2D5A27] dark:text-[#4ADE80]"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label id="label-hp" htmlFor="hp" className="text-xl font-bold text-[#2D5A27] dark:text-[#4ADE80] block transition-colors duration-300">
+              NOMOR HP / WHATSAPP
+            </label>
+            <input
+              id="input-hp"
+              type="tel"
+              placeholder="08XXXXXXXXXX"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="w-full bg-[#F5F5F0] dark:bg-[#121212] border-4 border-[#2D5A27]/20 dark:border-[#4ADE80]/20 rounded-2xl p-6 text-2xl font-black focus:border-[#2D5A27] dark:focus:border-[#4ADE80] focus:ring-0 outline-none transition-all placeholder:text-[#2D5A27]/30 dark:placeholder:text-[#4ADE80]/30 text-[#2D5A27] dark:text-[#4ADE80]"
             />
           </div>
 
