@@ -66,7 +66,9 @@ export function AdminDashboard({ onLogout }: Props) {
 
   const isCreator = auth.currentUser?.email === 'alhabsyiadit@gmail.com';
   const isSuperAdmin = (admin?: AdminUser | null) => admin?.role === 'super_admin' || isCreator;
-  const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || import.meta.env.VITE_GOOGLE_MAPS_PLATFORM_KEY || '';
+  
+  // Ambil API Key dari Secrets (VITE_GOOGLE_MAPS_PLATFORM_KEY)
+  const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_PLATFORM_KEY || '';
 
   const superAdminAccess = isSuperAdmin(currentUserAdmin);
 

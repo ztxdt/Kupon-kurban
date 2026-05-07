@@ -143,14 +143,23 @@ export function RegistrationForm({ onSuccess }: Props) {
 
       onSuccess(couponId);
     } catch (err: any) {
-      console.error(err);
+      console.error('Registration Error:', err);
+      let userMsg = 'Gagal mengambil kupon. Silakan coba lagi.';
       if (err.message === 'LIMIT_REACHED') {
-        setError('MAAF, KUPON BARU SAJA HABIS! HUBUNGI PANITIA.');
+        userMsg = 'MAAF, KUPON BARU SAJA HABIS! HUBUNGI PANITIA.';
       } else if (err.message === 'DUPLICATE_PHONE') {
-        setError('NOMOR HP INI SUDAH TERDAFTAR! SATU HP HANYA UNTUK SATU KUPON.');
-      } else {
+        userMsg = 'NOMOR HP INI SUDAH TERDAFTAR! SATU HP HANYA UNTUK SATU KUPON.';
+      } else if (err.code === 'permission-denied') {
+        userMsg = 'AKSES DITOLAK. MOHON HUBUNGI PANITIA.';
+      }
+      
+      setError(userMsg);
+      // Still call handleFirestoreError for system logging/diagnostics
+      try {
         handleFirestoreError(err, OperationType.WRITE, counterPath);
-        setError('Gagal mengambil kupon. Silakan coba lagi.');
+      } catch (finalErr) {
+        // Fallback to avoid crashing the event handler if handleFirestoreError re-throws
+        console.error('Final Error Info:', finalErr);
       }
     } finally {
       setLoading(false);
