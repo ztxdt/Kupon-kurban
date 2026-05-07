@@ -66,7 +66,7 @@ export function AdminDashboard({ onLogout }: Props) {
 
   const isCreator = auth.currentUser?.email === 'alhabsyiadit@gmail.com';
   const isSuperAdmin = (admin?: AdminUser | null) => admin?.role === 'super_admin' || isCreator;
-  const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
+  const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || import.meta.env.VITE_GOOGLE_MAPS_PLATFORM_KEY || '';
 
   const superAdminAccess = isSuperAdmin(currentUserAdmin);
 
@@ -85,7 +85,7 @@ export function AdminDashboard({ onLogout }: Props) {
 
   // List & Expired Filter State
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('pending');
   const [expiredSearchTerm, setExpiredSearchTerm] = useState('');
 
   // Logs Filter State
@@ -694,6 +694,19 @@ export function AdminDashboard({ onLogout }: Props) {
     return 'border-red-500';
   };
 
+  const getTodayStats = () => {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayCoupons = coupons.filter(c => c.createdAt && c.createdAt.toDate() >= startOfDay);
+    return {
+      new: todayCoupons.length,
+      verified: todayCoupons.filter(c => c.status === 'verified').length,
+      expired: todayCoupons.filter(c => c.status === 'expired' || (getExpiryLabel(c.expiresAt)?.label === 'EXPIRED' && c.status === 'pending')).length
+    };
+  };
+
+  const todayStats = getTodayStats();
+
   return (
     <div className="space-y-6 pt-4">
       {/* Admin Header */}
@@ -798,6 +811,31 @@ export function AdminDashboard({ onLogout }: Props) {
             </div>
 
             {/* Charts Section */}
+            {/* Today Summary */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+              <div className="bg-white dark:bg-[#121212] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-sm">
+                <p className="text-[10px] font-black text-blue-500 uppercase mb-1">Baru Hari Ini</p>
+                <p className="text-3xl font-black dark:text-white">{todayStats.new}</p>
+                <div className="mt-2 h-1 w-full bg-blue-100 dark:bg-blue-900/30 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500" style={{ width: `${(todayStats.new / Math.max(1, coupons.length)) * 100}%` }}></div>
+                </div>
+              </div>
+              <div className="bg-white dark:bg-[#121212] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-sm">
+                <p className="text-[10px] font-black text-green-500 uppercase mb-1">Terverifikasi</p>
+                <p className="text-3xl font-black dark:text-white">{todayStats.verified}</p>
+                <div className="mt-2 h-1 w-full bg-green-100 dark:bg-green-900/30 rounded-full overflow-hidden">
+                  <div className="h-full bg-green-500" style={{ width: `${(todayStats.verified / Math.max(1, todayStats.new)) * 100}%` }}></div>
+                </div>
+              </div>
+              <div className="bg-white dark:bg-[#121212] p-6 rounded-3xl border border-gray-100 dark:border-white/5 shadow-sm">
+                <p className="text-[10px] font-black text-red-500 uppercase mb-1">Hangus</p>
+                <p className="text-3xl font-black dark:text-white">{todayStats.expired}</p>
+                <div className="mt-2 h-1 w-full bg-red-100 dark:bg-red-900/30 rounded-full overflow-hidden">
+                   <div className="h-full bg-red-500" style={{ width: `${(todayStats.expired / Math.max(1, todayStats.new)) * 100}%` }}></div>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               {/* Bar Chart */}
               <div className="h-[300px] w-full bg-gray-50 dark:bg-[#121212] p-4 rounded-3xl border border-gray-100 dark:border-white/5">
@@ -885,8 +923,13 @@ export function AdminDashboard({ onLogout }: Props) {
                  <div className="flex items-center gap-2">
                    <span className="font-black text-xl dark:text-white">{coupons.length}</span>
                    {superAdminAccess && coupons.length > 0 && (
-                     <button onClick={clearVerifiedCoupons} className="p-1.5 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity" title="Bersihkan Kupon Selesai (Verified)">
-                       <Trash2 className="w-4 h-4" />
+                     <button 
+                       type="button"
+                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); clearVerifiedCoupons(); }} 
+                       className="p-6 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded-2xl opacity-100 transition-all cursor-pointer relative z-[9999] active:scale-75 shadow-xl flex items-center justify-center min-w-[64px] min-h-[64px]" 
+                       title="Bersihkan Kupon Selesai (Verified)"
+                     >
+                       <Trash2 className="w-8 h-8 pointer-events-none" />
                      </button>
                    )}
                  </div>
@@ -915,11 +958,11 @@ export function AdminDashboard({ onLogout }: Props) {
               <h3 className="font-black text-xl uppercase dark:text-white">Audit Log (Aktivitas Admin)</h3>
               {auditLogs.length > 0 && (
                 <button 
-                  onClick={clearLogs}
-                  className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors"
+                  onClick={(e) => { e.stopPropagation(); clearLogs(); }}
+                  className="p-6 bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-500 hover:text-white rounded-2xl transition-all shadow-xl cursor-pointer z-[9999] flex items-center justify-center min-w-[64px] min-h-[64px] relative active:scale-75"
                   title="Bersihkan Log"
                 >
-                  <Trash2 className="w-5 h-5" />
+                  <Trash2 className="w-8 h-8 pointer-events-none" />
                 </button>
               )}
             </div>
@@ -964,14 +1007,22 @@ export function AdminDashboard({ onLogout }: Props) {
                           {log.timestamp ? format(log.timestamp.toDate(), 'HH:mm:ss dd/MM', { locale: localeId }) : '...'}
                         </span>
                         <button 
-                          onClick={() => removeAuditLogItem(log.id)}
-                          className="text-gray-400 hover:text-red-500 transition-colors"
+                          type="button"
+                          onClick={(e) => { 
+                            e.preventDefault();
+                            e.stopPropagation(); 
+                            removeAuditLogItem(log.id); 
+                          }}
+                          className="p-6 bg-white dark:bg-[#1E1E1E] text-gray-400 hover:text-red-500 rounded-2xl transition-all cursor-pointer z-[9999] flex items-center justify-center relative min-w-[64px] min-h-[64px] shadow-xl active:scale-75"
+                          title="Hapus Log"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-8 h-8 pointer-events-none" />
                         </button>
                       </div>
                     </div>
-                    <p className="text-sm font-bold text-gray-800 dark:text-gray-200">{log.details}</p>
+                    <p className="text-sm font-bold text-gray-800 dark:text-gray-200">
+                      {log.details.replace(/\(.*\)/, '(***)')}
+                    </p>
                     <p className="text-[10px] text-blue-500 dark:text-blue-400 font-bold uppercase">{log.adminEmail}</p>
                   </div>
                 ))}
@@ -1018,22 +1069,32 @@ export function AdminDashboard({ onLogout }: Props) {
                           {c.queueNumber}
                         </div>
                         <div>
-                          <p className="font-black text-sm uppercase text-red-900 dark:text-red-300">{c.name}</p>
+                          <p className={`font-black text-sm uppercase ${c.status === 'verified' ? 'text-green-600 font-black' : 'text-red-900 dark:text-red-300'}`}>
+                            {c.status === 'pending' && !isExpired ? c.name : `KUPON ${c.status === 'verified' ? 'SELESAI' : 'HANGUS'}`}
+                          </p>
                           <p className="text-[10px] font-bold text-red-600 dark:text-red-500 uppercase opacity-70">
-                            Expired: {format(c.expiresAt.toDate(), 'HH:mm dd/MM', { locale: localeId })}
+                            {c.status === 'pending' && !isExpired ? `Expired: ${format(c.expiresAt.toDate(), 'HH:mm dd/MM', { locale: localeId })}` : 'DATA PENERIMA DISEMBUNYIKAN'}
                           </p>
                         </div>
                       </div>
-                      <button 
-                        onClick={() => removeCoupon(c.id)}
-                        className="p-2 bg-white dark:bg-[#1E1E1E] text-red-600 dark:text-red-400 rounded-xl border border-red-100 dark:border-white/10 hover:bg-red-600 dark:hover:bg-red-700 hover:text-white dark:hover:text-white transition-all shadow-sm"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {superAdminAccess && (
+                        <button 
+                          type="button"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            await removeCoupon(c.id);
+                          }}
+                          className="p-6 bg-white dark:bg-[#1E1E1E] text-red-600 dark:text-red-400 rounded-2xl border-2 border-red-100 dark:border-white/10 hover:bg-red-600 dark:hover:bg-red-700 hover:text-white dark:hover:text-white transition-all shadow-2xl cursor-pointer min-w-[64px] min-h-[64px] flex items-center justify-center relative z-[9999] active:scale-75"
+                          title="Hapus Permanen"
+                        >
+                          <Trash2 className="w-8 h-8 pointer-events-none" />
+                        </button>
+                      )}
                     </div>
                     <div className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1 mt-1 bg-white/50 dark:bg-white/5 p-2 rounded-xl transition-colors duration-300">
                       <MapPin className="w-3 h-3" />
-                      {c.address}
+                      {c.status === 'pending' && !isExpired ? c.address : '*** ALAMAT DIHAPUS ***'}
                     </div>
                   </div>
                 ))}
@@ -1052,8 +1113,17 @@ export function AdminDashboard({ onLogout }: Props) {
                 <div className="flex justify-between items-center">
                   <h3 className="font-black text-xl uppercase dark:text-white">Daftar Antrian</h3>
                   {superAdminAccess && (
-                    <button onClick={resetAll} className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors" title="Reset Semua Data">
-                      <Trash2 className="w-5 h-5" />
+                    <button 
+                      type="button"
+                      onClick={async (e) => { 
+                        e.preventDefault();
+                        e.stopPropagation(); 
+                        await resetAll(); 
+                      }} 
+                      className="p-6 bg-red-50 dark:bg-red-900/20 text-red-500 hover:bg-red-500 hover:text-white rounded-2xl transition-all shadow-xl cursor-pointer z-[9999] flex items-center justify-center min-w-[64px] min-h-[64px] relative active:scale-75" 
+                      title="Reset Semua Data"
+                    >
+                      <Trash2 className="w-8 h-8 pointer-events-none" />
                     </button>
                   )}
                 </div>
@@ -1072,10 +1142,16 @@ export function AdminDashboard({ onLogout }: Props) {
                     className="w-full bg-white dark:bg-[#1E1E1E] p-3 rounded-xl text-xs font-black border border-transparent outline-none dark:text-white"
                   >
                     <option value="all">SEMUA STATUS</option>
-                    <option value="pending">PENDING</option>
-                    <option value="verified">VERIFIED</option>
-                    <option value="expired">EXPIRED</option>
+                    <option value="pending">AKTIF (PENDING)</option>
+                    <option value="verified">SELESAI (VERIFIED)</option>
+                    <option value="expired">HANGUS (EXPIRED)</option>
                   </select>
+                  <button 
+                    onClick={() => window.print()} 
+                    className="md:col-span-2 w-full bg-[#202020] text-white p-3 rounded-xl text-[10px] font-black uppercase hover:bg-black transition-all flex items-center justify-center gap-2 print:hidden"
+                  >
+                    <Download className="w-4 h-4" /> CETAK / EXPORT PDF LAPORAN
+                </button>
                 </div>
              </div>
 
@@ -1108,11 +1184,13 @@ export function AdminDashboard({ onLogout }: Props) {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className={`font-black uppercase transition-colors duration-300 truncate ${c.status === 'verified' ? 'text-green-600' : isActuallyExpired ? 'text-red-600' : isNearingExpiry ? 'text-yellow-600' : 'text-[#2D5A27] dark:text-[#4ADE80]'}`}>
-                            {c.name}
+                            {c.status === 'pending' && !isActuallyExpired ? c.name : `KUPON ${c.status === 'verified' ? 'SELESAI' : 'HANGUS'}`}
                           </p>
                           <div className="flex items-center gap-1 mt-0.5">
                             <MapPin className="w-3 h-3 text-gray-400 dark:text-gray-600" />
-                            <p className="text-[10px] text-gray-400 dark:text-gray-500 font-bold uppercase truncate">{c.address}</p>
+                            <p className="text-[10px] text-gray-400 dark:text-gray-500 font-bold uppercase truncate">
+                              {c.status === 'pending' && !isActuallyExpired ? c.address : '*** DATA DIHAPUS ***'}
+                            </p>
                           </div>
                           {c.status === 'pending' && !isActuallyExpired && (
                             <p className={`text-[9px] font-black uppercase mt-1 ${isNearingExpiry ? 'text-yellow-600 animate-pulse' : 'text-gray-400'}`}>
@@ -1120,15 +1198,20 @@ export function AdminDashboard({ onLogout }: Props) {
                             </p>
                           )}
                         </div>
-                        <div className="flex flex-col gap-2">
+                        <div className="flex flex-col gap-2 relative">
                           <div className="flex gap-1">
                             {superAdminAccess && (
                               <button 
-                                onClick={() => removeCoupon(c.id)}
-                                className="bg-red-50 text-red-600 p-2 rounded-lg hover:bg-red-500 hover:text-white transition-all shadow-sm flex items-center justify-center"
+                                type="button"
+                                onClick={async (e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  await removeCoupon(c.id);
+                                }}
+                                className="bg-red-50 text-red-600 p-6 rounded-2xl hover:bg-red-500 hover:text-white transition-all shadow-xl flex items-center justify-center cursor-pointer min-w-[64px] min-h-[64px] relative z-[9999] active:scale-75"
                                 title="Hapus Permanen"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-8 h-8 pointer-events-none" />
                               </button>
                             )}
                             {c.status === 'pending' && !isActuallyExpired ? (
@@ -1232,12 +1315,14 @@ export function AdminDashboard({ onLogout }: Props) {
                             {c.queueNumber}
                           </div>
                           <div className="min-w-0">
-                            <p className="font-bold text-sm uppercase truncate dark:text-white">{c.name}</p>
-                            {c.phone && (
+                            <p className="font-bold text-sm uppercase truncate dark:text-white">
+                              {c.status === 'pending' ? c.name : 'KUPON SELESAI'}
+                            </p>
+                            {c.phone && c.status === 'pending' && (
                               <p className="text-[10px] text-blue-600 dark:text-blue-400 font-black italic">📞 {c.phone}</p>
                             )}
                             <p className={`text-[10px] font-black uppercase transition-colors duration-300 ${expiry?.color}`}>
-                              Expires: {expiry?.label}
+                              {c.status === 'pending' ? `Expires: ${expiry?.label}` : 'DATA DISEMBUNYIKAN'}
                             </p>
                           </div>
                        </div>
@@ -1253,12 +1338,17 @@ export function AdminDashboard({ onLogout }: Props) {
                          </button>
                          {superAdminAccess && (
                            <button 
-                             onClick={() => removeCoupon(c.id)}
-                             className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-3 rounded-xl hover:bg-red-500 hover:text-white transition-all transition-colors duration-300"
-                             title="Hapus Permanen"
-                           >
-                             <Trash2 className="w-4 h-4" />
-                           </button>
+                            type="button"
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              await removeCoupon(c.id);
+                            }}
+                            className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-6 rounded-2xl hover:bg-red-600 hover:text-white transition-all shadow-2xl cursor-pointer min-w-[64px] min-h-[64px] flex items-center justify-center relative z-[9999] active:scale-75"
+                            title="Hapus Permanen"
+                          >
+                            <Trash2 className="w-7 h-7 pointer-events-none" />
+                          </button>
                          )}
                        </div>
                      </div>
@@ -1283,23 +1373,29 @@ export function AdminDashboard({ onLogout }: Props) {
                             {c.queueNumber}
                           </div>
                           <div className="min-w-0">
-                            <p className="font-bold text-sm uppercase truncate text-red-900 dark:text-red-300">{c.name}</p>
-                            <p className="text-[10px] font-black uppercase text-red-600 dark:text-red-400">KADALUARSA</p>
+                            <p className="font-bold text-sm uppercase truncate text-red-900 dark:text-red-300">KUPON HANGUS</p>
+                            <p className="text-[10px] font-black uppercase text-red-600 dark:text-red-400">DATA DISEMBUNYIKAN</p>
                           </div>
                        </div>
                        <div className="flex gap-2">
                          <button 
                            onClick={() => sendNotification(c.id, "MAAF: Kupon Anda sudah kadaluarsa. Silakan hubungi panitia untuk bantuan.")}
-                           className="bg-red-600 dark:bg-red-700 text-white p-3 rounded-xl hover:bg-red-700 dark:hover:bg-red-800 transition-all shadow-sm transition-colors duration-300"
+                           className="bg-gray-100 dark:bg-white/5 text-red-600 p-3 rounded-xl hover:bg-red-100 transition-all shadow-sm"
                          >
                            <Bell className="w-4 h-4" />
                          </button>
                          {superAdminAccess && (
                            <button 
-                             onClick={() => removeCoupon(c.id)}
-                             className="bg-white dark:bg-[#1E1E1E] text-red-600 dark:text-red-400 p-3 rounded-xl border border-red-200 dark:border-white/10 hover:bg-red-50 dark:hover:bg-white/5 transition-all transition-colors duration-300"
+                             type="button"
+                             onClick={async (e) => {
+                               e.preventDefault();
+                               e.stopPropagation();
+                               await removeCoupon(c.id);
+                             }}
+                             className="bg-white dark:bg-[#1E1E1E] text-red-600 dark:text-red-400 p-6 rounded-2xl border-2 border-red-200 dark:border-white/10 hover:bg-red-600 hover:text-white transition-all cursor-pointer min-w-[64px] min-h-[64px] flex items-center justify-center relative z-[9999] active:scale-75"
+                             title="Hapus Permanen"
                            >
-                             <Trash2 className="w-4 h-4" />
+                             <Trash2 className="w-8 h-8 pointer-events-none" />
                            </button>
                          )}
                        </div>
@@ -1387,8 +1483,17 @@ export function AdminDashboard({ onLogout }: Props) {
                       </div>
                     </div>
                     {admin.email !== auth.currentUser?.email && admin.email !== 'alhabsyiadit@gmail.com' && (
-                      <button onClick={() => removeAdmin(admin.id)} className="text-red-400 hover:text-red-600 p-1">
-                        <Trash2 className="w-4 h-4" />
+                      <button 
+                        type="button"
+                        onClick={async (e) => { 
+                          e.preventDefault();
+                          e.stopPropagation(); 
+                          await removeAdmin(admin.id); 
+                        }} 
+                        className="bg-red-50 dark:bg-red-900/20 text-red-400 hover:text-red-700 p-6 rounded-2xl transition-all shadow-xl cursor-pointer z-[9999] min-w-[64px] min-h-[64px] relative active:scale-75"
+                        title="Hapus Akses"
+                      >
+                        <Trash2 className="w-8 h-8 pointer-events-none" />
                       </button>
                     )}
                   </div>
@@ -1405,8 +1510,12 @@ export function AdminDashboard({ onLogout }: Props) {
                           <p className="font-medium text-sm text-gray-400 dark:text-gray-600 italic truncate">{invite.email}</p>
                           <span className="text-[8px] font-black text-gray-300 dark:text-gray-700 uppercase italic">Calon {invite.role === 'super_admin' ? 'SUPER ADMIN' : 'PANITIA'}</span>
                         </div>
-                        <button onClick={() => removeInvitation(invite.id)} className="text-gray-300 hover:text-red-400 p-1">
-                          <Trash2 className="w-4 h-4" />
+                        <button 
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeInvitation(invite.id); }} 
+                          className="bg-red-50 dark:bg-white/5 text-gray-400 hover:text-red-500 p-6 rounded-2xl transition-all shadow-xl cursor-pointer z-[9999] min-w-[64px] min-h-[64px] flex items-center justify-center active:scale-75"
+                        >
+                          <Trash2 className="w-8 h-8 pointer-events-none" />
                         </button>
                       </div>
                     ))}
@@ -1458,12 +1567,21 @@ export function AdminDashboard({ onLogout }: Props) {
                   </div>
                 </div>
                 
-                <div className="h-[400px] w-full rounded-3xl overflow-hidden border-4 border-[#2D5A27]/10 dark:border-white/5 shadow-inner">
+                <div className="h-[400px] w-full rounded-3xl overflow-hidden border-4 border-[#2D5A27]/20 dark:border-white/10 shadow-2xl relative">
                   {GOOGLE_MAPS_API_KEY ? (
-                    <APIProvider apiKey={GOOGLE_MAPS_API_KEY}>
+                    <APIProvider 
+                      apiKey={GOOGLE_MAPS_API_KEY}
+                      onLoad={() => console.log('Google Maps API Loaded')}
+                      onError={(err) => {
+                        console.error('Google Maps Load Error:', err);
+                        setStatusMsg({ type: 'error', text: 'Google Maps Gagal Dimuat: Periksa Aktivasi API' });
+                      }}
+                    >
                       <Map
                         defaultCenter={mapPos}
                         defaultZoom={17}
+                        mapId="MAIN_MAP_ID"
+                        internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
                         onClick={(e) => {
                           if (e.detail.latLng) {
                             setMapPos({ lat: e.detail.latLng.lat, lng: e.detail.latLng.lng });
@@ -1484,10 +1602,34 @@ export function AdminDashboard({ onLogout }: Props) {
                     </APIProvider>
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center bg-gray-50 dark:bg-[#121212] p-8 text-center space-y-4">
-                      <AlertCircle className="w-12 h-12 text-red-500" />
+                      <div className="bg-red-100 dark:bg-red-900/30 p-4 rounded-full">
+                        <AlertCircle className="w-12 h-12 text-red-500" />
+                      </div>
                       <div>
-                        <p className="font-bold text-gray-900 dark:text-white">GOOGLE MAPS API KEY TIDAK DITEMUKAN</p>
-                        <p className="text-xs text-gray-500 uppercase mt-2">Mohon masukkan API Key di Pengaturan (GOOGLE_MAPS_PLATFORM_KEY)</p>
+                        <p className="font-black text-gray-900 dark:text-white uppercase tracking-tight">API GOOGLE MAPS BERMASALAH (LIMIT/BELUM AKTIF)</p>
+                        <p className="text-[10px] text-gray-500 uppercase mt-2 font-bold leading-relaxed px-4">
+                          1. Pastikan "Maps JavaScript API" sudah di-ENABLE di Cloud Console<br/>
+                          2. Cek apakah Billing sudah terhubung (Wajib untuk Maps v3)<br/>
+                          3. Cek Quota limit di dashboard Google Cloud<br/>
+                          (Error: ApiNotActivatedMapError / QuotaExceededError)
+                        </p>
+                        <div className="flex gap-2 justify-center mt-4">
+                          <a 
+                            href="https://console.cloud.google.com/google/maps-apis/api-list" 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="text-[10px] bg-red-600 text-white px-4 py-2 rounded-xl font-black uppercase hover:bg-red-700 transition-all shadow-lg"
+                          >
+                            AKTIVASI / CEK QUOTA
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => setStatusMsg({ type: 'info', text: 'Anda masih bisa menyimpan koordinat manual di atas tanpa bantuan peta.' })}
+                            className="text-[10px] bg-gray-200 dark:bg-white/10 text-gray-600 dark:text-gray-300 px-4 py-2 rounded-xl font-black uppercase hover:bg-gray-300 transition-all"
+                          >
+                            ABAIKAN
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1553,10 +1695,10 @@ export function AdminDashboard({ onLogout }: Props) {
                     <p className="text-[8px] text-gray-500 italic">Menghapus SELURUH data kupon & log dari database secara permanen.</p>
                     <button 
                       type="button"
-                      onClick={resetAll}
-                      className="w-full bg-red-600 dark:bg-red-700 text-white p-4 rounded-xl font-black uppercase text-xs shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2"
+                      onClick={(e) => { e.stopPropagation(); resetAll(); }}
+                      className="w-full bg-red-600 dark:bg-red-700 text-white p-6 rounded-[2rem] font-black uppercase text-sm shadow-2xl active:scale-90 transition-all flex items-center justify-center gap-3 cursor-pointer relative z-[9999] hover:bg-red-500"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 className="w-8 h-8 pointer-events-none" />
                       RESET TOTAL SISTEM
                     </button>
                   </div>
