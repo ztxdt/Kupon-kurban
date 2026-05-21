@@ -6,7 +6,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, Clock, AlertCircle, MapPin, Calendar, X, Map } from 'lucide-react';
 import type { Coupon, Settings } from '../types';
 import { format } from 'date-fns';
-import { id as localeId } from 'date-fns/locale';
+import { id as localeId, enUS as localeEn } from 'date-fns/locale';
+import { useLanguage } from '../lib/LanguageContext';
 
 interface Props {
   couponId: string;
@@ -31,6 +32,7 @@ export function CouponDisplay({ couponId }: Props) {
   const [loading, setLoading] = useState(true);
   const [isNearMosque, setIsNearMosque] = useState(false);
   const [geoError, setGeoError] = useState<string | null>(null);
+  const { language, t } = useLanguage();
 
   useEffect(() => {
     const unsubCoupon = onSnapshot(doc(db, 'coupons', couponId), (doc) => {
@@ -63,7 +65,7 @@ export function CouponDisplay({ couponId }: Props) {
 
     const checkLocation = () => {
       if (!navigator.geolocation) {
-        setGeoError('Perangkat tidak mendukung lokasi');
+        setGeoError(t.gpsNoSupport);
         return;
       }
 
@@ -81,7 +83,7 @@ export function CouponDisplay({ couponId }: Props) {
         },
         (err) => {
           console.warn('Geolocation error:', err.message);
-          setGeoError('Gagal mendeteksi lokasi. Pastikan GPS aktif.');
+          setGeoError(t.gpsFailed);
         },
         { enableHighAccuracy: true, timeout: 5000 }
       );
@@ -97,13 +99,13 @@ export function CouponDisplay({ couponId }: Props) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
         <div className="w-16 h-16 border-8 border-[#2D5A27] dark:border-[#4ADE80] border-t-transparent rounded-full animate-spin transition-colors duration-300"></div>
-        <p className="mt-4 font-bold text-[#2D5A27] dark:text-[#4ADE80] animate-pulse transition-colors duration-300 uppercase">MEMUAT KUPON ANDA...</p>
+        <p className="mt-4 font-bold text-[#2D5A27] dark:text-[#4ADE80] animate-pulse transition-colors duration-300 uppercase">{t.loadingCoupon}</p>
       </div>
     );
   }
 
   if (!coupon) {
-    return <div className="text-center p-10 dark:text-white">Kupon tidak ditemukan.</div>;
+    return <div className="text-center p-10 dark:text-white">{t.couponNotFound}</div>;
   }
 
   const isPending = coupon.status === 'pending';
@@ -127,7 +129,7 @@ export function CouponDisplay({ couponId }: Props) {
         <div className={`fixed bottom-24 right-4 z-50 flex items-center gap-2 p-3 rounded-2xl border-2 shadow-2xl transition-all duration-500 scale-90 ${isNearMosque ? 'bg-green-100 dark:bg-green-900/30 border-green-500 text-green-700 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-900 shadow-none border-gray-300 text-gray-500'}`}>
           {isNearMosque ? <CheckCircle2 className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
           <span className="text-[10px] font-black uppercase tracking-tighter">
-            {isNearMosque ? 'TERDETEKSI DI LOKASI' : 'GPS AKTIF: LUAR LOKASI'}
+            {isNearMosque ? t.gpsActiveLocation : t.gpsActiveOutside}
           </span>
         </div>
       )}
@@ -167,7 +169,7 @@ export function CouponDisplay({ couponId }: Props) {
             {isPending && <Clock className="w-12 h-12 text-white animate-pulse" />}
             {isExpired && <AlertCircle className="w-12 h-12 text-white" />}
             <h2 className="text-3xl font-black text-white tracking-widest uppercase">
-              {isVerified ? 'SUKSES' : isPending ? 'PENDING' : 'KADALUARSA'}
+              {isVerified ? t.statusSuccess : isPending ? t.statusPending : t.statusExpired}
             </h2>
           </div>
         </div>
@@ -175,7 +177,7 @@ export function CouponDisplay({ couponId }: Props) {
         <div className="p-8 space-y-8">
           {/* Queue Number */}
           <div className="text-center">
-            <p className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest transition-colors duration-300">Nomor Antrian</p>
+            <p className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest transition-colors duration-300">{t.queueNumberLabel}</p>
             <h3 className="text-[120px] font-black text-[#2D5A27] dark:text-[#4ADE80] leading-none mb-4 font-display italic transition-colors duration-300">
               {coupon.queueNumber}
             </h3>
@@ -193,14 +195,14 @@ export function CouponDisplay({ couponId }: Props) {
             </div>
             <p className="text-center font-bold text-[#2D5A27] dark:text-[#4ADE80] text-lg px-4 leading-snug transition-colors duration-300">
                {isVerified 
-                 ? "SIAP DIGUNAKAN! Tunjukkan QR ini kepada petugas." 
+                 ? t.qrSuccessDesc 
                  : isPending 
-                 ? "MOHON MINTA PANITIA UNTUK SCAN QR CODE ANDA"
-                 : "MAAF, KUPON INI SUDAH TIDAK BERLAKU"}
+                 ? t.qrPendingDesc
+                 : t.qrExpiredDesc}
             </p>
             {isPending && (
               <p className="text-center font-black text-red-600 dark:text-red-400 animate-bounce mt-4 uppercase text-sm tracking-tighter">
-                {isNearMosque ? "ANDA SUDAH DI LOKASI! VERIFIKASI AKAN BERJALAN OTOMATIS SAAT MENDEKATI WAKTU TUKAR" : "MOHON TUNGGU NOMOR ANTRIAN DI SEBUT DAN SABAR"}
+                {isNearMosque ? t.gpsNearMessage : t.gpsFarMessage}
               </p>
             )}
           </div>
@@ -208,13 +210,13 @@ export function CouponDisplay({ couponId }: Props) {
           {/* Citizen Details */}
           <div className="grid grid-cols-2 gap-4 border-t-2 border-[#F5F5F0] dark:border-[#121212] pt-6 transition-colors duration-300">
             <div className="bg-[#F5F5F0] dark:bg-[#121212] p-4 rounded-2xl transition-colors duration-300">
-              <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">Nama</p>
+              <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">{t.civicName}</p>
               <p className="font-extrabold text-[#2D5A27] dark:text-[#4ADE80] text-lg leading-tight uppercase">{coupon.name}</p>
             </div>
             <div className="bg-[#F5F5F0] dark:bg-[#121212] p-4 rounded-2xl transition-colors duration-300">
-              <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">Tanggal</p>
+              <p className="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase">{t.civicDate}</p>
               <p className="font-black text-[#2D5A27] dark:text-[#4ADE80]">
-                {coupon.createdAt ? format(coupon.createdAt.toDate(), 'dd/MM/yyyy', { locale: localeId }) : '...'}
+                {coupon.createdAt ? format(coupon.createdAt.toDate(), 'dd/MM/yyyy', { locale: language === 'id' ? localeId : localeEn }) : '...'}
               </p>
             </div>
           </div>
@@ -222,18 +224,18 @@ export function CouponDisplay({ couponId }: Props) {
           <div className="bg-green-50 dark:bg-green-900/10 p-6 rounded-2xl space-y-4 border-l-8 border-[#2D5A27] dark:border-[#4ADE80] transition-colors duration-300">
              <p className="font-bold text-[#2D5A27] dark:text-[#4ADE80] italic text-xl leading-relaxed">
                {isVerified 
-                 ? "Alhamdulillah! Anda mendapatkan kupon kurban. Pengambilan daging dilakukan setelah pemotongan selesai."
-                 : "Silakan simpan halaman ini dan tunjukkan kepada panitia di lokasi Masjid."}
+                 ? t.alhamdulillahDesc
+                 : t.savePageDesc}
              </p>
              
-             {isPending && coupon.expiresAt && (
-                <div className="flex items-center gap-2 text-yellow-700 dark:text-yellow-500 font-bold bg-yellow-100 dark:bg-yellow-900/20 p-3 rounded-lg border border-yellow-200 dark:border-yellow-800/50 transition-colors duration-300">
-                  <Clock className="w-5 h-5" />
-                  <p className="text-sm">
-                    Berlaku sampai: {format(coupon.expiresAt.toDate(), 'HH:mm', { locale: localeId })} WIB
-                  </p>
-                </div>
-             )}
+              {isPending && coupon.expiresAt && (
+                 <div className="flex items-center gap-2 text-yellow-700 dark:text-yellow-500 font-bold bg-yellow-100 dark:bg-yellow-900/20 p-3 rounded-lg border border-yellow-200 dark:border-yellow-800/50 transition-colors duration-300">
+                   <Clock className="w-5 h-5" />
+                   <p className="text-sm">
+                     {t.validUntil}: {format(coupon.expiresAt.toDate(), 'HH:mm', { locale: language === 'id' ? localeId : localeEn })} {t.wib}
+                   </p>
+                 </div>
+              )}
           </div>
         </div>
       </div>
@@ -247,13 +249,13 @@ export function CouponDisplay({ couponId }: Props) {
             className="w-full bg-[#2D5A27] dark:bg-[#4ADE80] text-white dark:text-[#121212] p-5 rounded-3xl font-black text-xl flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all uppercase tracking-tight"
           >
             <Map className="w-6 h-6" />
-            Petunjuk Jalan Ke Masjid
+            {t.directionsToMosque}
           </a>
         )}
         <div className="flex items-center gap-3 text-gray-600 dark:text-gray-300 bg-white dark:bg-[#1E1E1E] p-4 rounded-2xl shadow-md transition-colors duration-300 border border-gray-100 dark:border-white/5">
            <MapPin className="w-6 h-6 text-[#2D5A27] dark:text-[#4ADE80]" />
            <p className="font-bold text-sm tracking-tight leading-tight">
-             {isNearMosque ? "Sistem mendeteksi Anda sudah di lokasi masjid." : "Pastikan GPS aktif & berada di sekitar lokasi untuk verifikasi panitia."}
+             {isNearMosque ? t.gpsNearSystemMsg : t.gpsFarSystemMsg}
            </p>
         </div>
         {geoError && (
@@ -263,7 +265,7 @@ export function CouponDisplay({ couponId }: Props) {
           onClick={() => window.print()} 
           className="w-full bg-white dark:bg-[#1E1E1E] border-4 border-[#2D5A27] dark:border-[#4ADE80] text-[#2D5A27] dark:text-[#4ADE80] font-black rounded-3xl p-5 text-xl tracking-widest hover:bg-[#F5F5F0] dark:hover:bg-[#121212] transition-all"
         >
-          CETAK KUPON (OPSIONAL)
+          {t.printCoupon}
         </button>
       </div>
     </div>

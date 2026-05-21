@@ -38,44 +38,18 @@ export function AdminLogin({ onLoginSuccess, onBack }: Props) {
       
       if (adminDoc.exists()) {
         const data = adminDoc.data();
-        // Super admin auto-assign
-        if (email === 'alhabsyiadit@gmail.com' && data.role !== 'super_admin') {
+        if (data.role !== 'super_admin') {
           await setDoc(doc(db, adminPath), { ...data, role: 'super_admin' }, { merge: true });
         }
         onLoginSuccess();
       } else {
-        // First user or specific email becomes super admin
-        const adminsSnap = await getDocs(query(collection(db, 'admins'), limit(1)));
-        if (adminsSnap.empty || email === 'alhabsyiadit@gmail.com') {
-          await setDoc(doc(db, adminPath), {
-            email: email,
-            role: 'super_admin',
-            createdAt: new Date()
-          });
-          onLoginSuccess();
-        } else {
-          // Check for invitations
-          const inviteQuery = query(collection(db, 'invitations'), where('email', '==', email));
-          const snap = await getDocs(inviteQuery);
-          
-          if (!snap.empty) {
-            const inviteData = snap.docs[0].data() as any;
-            const role = inviteData.role || 'operator';
-            
-            // Cleanup invitations
-            const deletePromises = snap.docs.map(d => deleteDoc(d.ref));
-            await Promise.all(deletePromises);
-
-            await setDoc(doc(db, adminPath), {
-              email: email,
-              role: role,
-              createdAt: new Date()
-            });
-            onLoginSuccess();
-          } else {
-            setError('Akses ditolak. Email Anda tidak terdaftar sebagai panitia.');
-          }
-        }
+        // Automatically make them super_admin since they know the master access password
+        await setDoc(doc(db, adminPath), {
+          email: email,
+          role: 'super_admin',
+          createdAt: new Date()
+        });
+        onLoginSuccess();
       }
     } catch (err: any) {
       handleFirestoreError(err, OperationType.GET, adminPath);
@@ -169,7 +143,7 @@ export function AdminLogin({ onLoginSuccess, onBack }: Props) {
       </div>
 
       <p className="text-center text-[10px] text-gray-400 dark:text-gray-600 uppercase tracking-widest leading-relaxed transition-colors duration-300 font-bold px-8">
-        Hanya email yang terdaftar sebagai Panitia atau Creator yang dapat mengakses Panel ini.
+        Masukkan kata sandi master untuk login atau mendaftar sebagai Admin menggunakan akun Google Anda.
       </p>
     </div>
   );

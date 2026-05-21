@@ -9,8 +9,9 @@ import { RegistrationForm } from './components/RegistrationForm';
 import { CouponDisplay } from './components/CouponDisplay';
 import { AdminDashboard } from './components/AdminDashboard';
 import { AdminLogin } from './components/AdminLogin';
-import { Settings, LogIn, LayoutDashboard, Menu, X as CloseIcon, WifiOff } from 'lucide-react';
+import { Settings, LogIn, LayoutDashboard, Menu, X as CloseIcon, WifiOff, Languages } from 'lucide-react';
 import { ThemeProvider } from './lib/ThemeContext';
+import { LanguageProvider, useLanguage } from './lib/LanguageContext';
 import { ThemeToggle } from './components/ThemeToggle';
 import { db } from './firebase';
 import { doc, getDocFromServer } from 'firebase/firestore';
@@ -22,6 +23,7 @@ function AppContent() {
   const [userCouponId, setUserCouponId] = useState<string | null>(localStorage.getItem('my_coupon_id'));
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const { language, setLanguage, t } = useLanguage();
 
   useEffect(() => {
     // Critical Constraint: Test connection on boot
@@ -79,7 +81,7 @@ function AppContent() {
         {isOffline && (
           <div className="bg-red-600 text-white px-3 py-2 rounded-full flex items-center gap-2 shadow-lg animate-pulse border border-white/20">
             <WifiOff className="w-4 h-4" />
-            <span className="text-[10px] font-black uppercase tracking-widest">Offline</span>
+            <span className="text-[10px] font-black uppercase tracking-widest">{t.offline}</span>
           </div>
         )}
         <ThemeToggle />
@@ -102,10 +104,11 @@ function AppContent() {
                 initial={{ opacity: 0, y: -20, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -20, scale: 0.95 }}
-                className="absolute right-0 mt-3 w-56 bg-white dark:bg-[#1E1E1E] rounded-3xl shadow-2xl border border-gray-100 dark:border-white/5 p-2 overflow-hidden"
+                className="absolute right-0 mt-3 w-60 bg-white dark:bg-[#1E1E1E] rounded-3xl shadow-2xl border border-gray-100 dark:border-white/5 p-2 overflow-hidden"
               >
-                <div className="p-3 border-b dark:border-white/5 mb-2">
-                  <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Akses Menu</p>
+                <div className="p-3 border-b dark:border-white/5 mb-2 flex items-center gap-2 text-gray-400 dark:text-gray-500">
+                  <Languages className="w-3.5 h-3.5" />
+                  <p className="text-[10px] font-black uppercase tracking-widest">{t.menuAccess}</p>
                 </div>
                 
                 {currentView !== 'admin_dashboard' && currentView !== 'admin_login' && (
@@ -117,7 +120,7 @@ function AppContent() {
                     className="w-full flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-white/5 rounded-2xl transition-colors text-left"
                   >
                     <Settings className="w-5 h-5 text-[#2D5A27] dark:text-[#4ADE80]" />
-                    <span className="font-bold text-sm text-gray-700 dark:text-gray-200">Login sebagai Admin</span>
+                    <span className="font-bold text-sm text-gray-700 dark:text-gray-200">{t.loginAdmin}</span>
                   </button>
                 )}
 
@@ -130,7 +133,7 @@ function AppContent() {
                     className="w-full flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-white/5 rounded-2xl transition-colors text-left"
                   >
                     <LogIn className="w-5 h-5 text-[#2D5A27] dark:text-[#4ADE80]" />
-                    <span className="font-bold text-sm text-gray-700 dark:text-gray-200">Daftar Lagi</span>
+                    <span className="font-bold text-sm text-gray-700 dark:text-gray-200">{t.registerAgain}</span>
                   </button>
                 )}
 
@@ -143,9 +146,38 @@ function AppContent() {
                     className="w-full flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-white/5 rounded-2xl transition-colors text-left"
                   >
                     <LayoutDashboard className="w-5 h-5 text-[#2D5A27] dark:text-[#4ADE80]" />
-                    <span className="font-bold text-sm text-gray-700 dark:text-gray-200">Halaman Utama</span>
+                    <span className="font-bold text-sm text-gray-700 dark:text-gray-200">{t.homePage}</span>
                   </button>
                 )}
+
+                {/* Ganti Bahasa / Language Switcher */}
+                <div className="border-t dark:border-white/5 mt-2 pt-2">
+                  <div className="px-3 py-1.5">
+                    <p className="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">{t.changeLanguage}</p>
+                  </div>
+                  <div className="flex flex-col gap-1 px-1">
+                    <button 
+                      onClick={() => setLanguage('id')}
+                      className={`w-full flex items-center justify-between p-3 rounded-xl transition-all text-left font-bold text-xs ${language === 'id' ? 'bg-[#2D5A27]/15 text-[#2D5A27] dark:bg-[#4ADE80]/20 dark:text-[#4ADE80]' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5'}`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="text-base shrink-0">🇮🇩</span>
+                        {t.indonesian}
+                      </span>
+                      {language === 'id' && <span className="w-2 h-2 rounded-full bg-[#2D5A27] dark:bg-[#4ADE80]"></span>}
+                    </button>
+                    <button 
+                      onClick={() => setLanguage('en')}
+                      className={`w-full flex items-center justify-between p-3 rounded-xl transition-all text-left font-bold text-xs ${language === 'en' ? 'bg-[#2D5A27]/15 text-[#2D5A27] dark:bg-[#4ADE80]/20 dark:text-[#4ADE80]' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5'}`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="text-base shrink-0">🇬🇧</span>
+                        {t.english}
+                      </span>
+                      {language === 'en' && <span className="w-2 h-2 rounded-full bg-[#2D5A27] dark:bg-[#4ADE80]"></span>}
+                    </button>
+                  </div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
@@ -205,7 +237,7 @@ function AppContent() {
 
       {/* Footer Branding */}
       <footer className="fixed bottom-0 left-0 right-0 p-4 bg-[#2D5A27] dark:bg-[#1B3618] text-white/70 text-center text-[10px] tracking-widest uppercase transition-colors duration-300">
-        Digital Kupon Kurban © 2026 • Kebersamaan dalam Berbagi
+        {t.brandingFooter}
       </footer>
     </div>
   );
@@ -214,7 +246,9 @@ function AppContent() {
 export default function App() {
   return (
     <ThemeProvider>
-      <AppContent />
+      <LanguageProvider>
+        <AppContent />
+      </LanguageProvider>
     </ThemeProvider>
   );
 }

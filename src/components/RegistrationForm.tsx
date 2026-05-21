@@ -3,6 +3,7 @@ import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, serverTimestamp, doc, getDoc, runTransaction, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 import { Settings, Beef, AlertCircle } from 'lucide-react';
 import type { Settings as SettingsType } from '../types';
+import { useLanguage } from '../lib/LanguageContext';
 
 interface Props {
   onSuccess: (id: string) => void;
@@ -16,6 +17,7 @@ export function RegistrationForm({ onSuccess }: Props) {
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [counter, setCounter] = useState<{ count: number } | null>(null);
   const [error, setError] = useState('');
+  const { t } = useLanguage();
 
   useEffect(() => {
     // Listen to settings for real-time updates (mosque name, max coupons, etc)
@@ -26,8 +28,8 @@ export function RegistrationForm({ onSuccess }: Props) {
       } else {
         // Default values if document does not exist yet
         setSettings({
-          mosqueName: "Masjid Baiturrahman",
-          mosqueAddress: "Alamat belum diatur",
+          mosqueName: t.defaultMosqueName,
+          mosqueAddress: t.defaultMosqueAddress,
           maxCoupons: 500,
           expiryMinutes: 60
         });
@@ -36,8 +38,8 @@ export function RegistrationForm({ onSuccess }: Props) {
       console.warn('Settings listener failed:', error);
       // Fallback or initial default
       setSettings(prev => prev || {
-        mosqueName: "Masjid Baiturrahman",
-        mosqueAddress: "Mode Offline / Hubungi Panitia",
+        mosqueName: t.defaultMosqueName,
+        mosqueAddress: t.offlineMode,
         maxCoupons: 500,
         expiryMinutes: 60
       });
@@ -63,14 +65,14 @@ export function RegistrationForm({ onSuccess }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !address || !phone) {
-      setError('Mohon isi Nama, No. HP, dan Alamat Anda');
+      setError(t.errorFillFields);
       return;
     }
     
     // Basic phone validation
     const phoneClean = phone.replace(/[^0-9]/g, '');
     if (phoneClean.length < 10) {
-      setError('Nomor HP tidak valid (Minimal 10 digit)');
+      setError(t.errorPhoneMin);
       return;
     }
     setError('');
@@ -78,7 +80,7 @@ export function RegistrationForm({ onSuccess }: Props) {
     // Check if user already has a coupon in localStorage (simple guard)
     const existingId = localStorage.getItem('my_coupon_id');
     if (existingId) {
-      setError('ANDA SUDAH MEMILIKI KUPON AKTIF. HARAP SELESAIKAN ANTRIAN ANDA.');
+      setError(t.errorActiveCoupon);
       return;
     }
 
@@ -144,13 +146,13 @@ export function RegistrationForm({ onSuccess }: Props) {
       onSuccess(couponId);
     } catch (err: any) {
       console.error('Registration Error:', err);
-      let userMsg = 'Gagal mengambil kupon. Silakan coba lagi.';
+      let userMsg = t.msgGenericWargaError;
       if (err.message === 'LIMIT_REACHED') {
-        userMsg = 'MAAF, KUPON BARU SAJA HABIS! HUBUNGI PANITIA.';
+        userMsg = t.limitReachedMsg;
       } else if (err.message === 'DUPLICATE_PHONE') {
-        userMsg = 'NOMOR HP INI SUDAH TERDAFTAR! SATU HP HANYA UNTUK SATU KUPON.';
+        userMsg = t.errorDupPhone;
       } else if (err.code === 'permission-denied') {
-        userMsg = 'AKSES DITOLAK. MOHON HUBUNGI PANITIA.';
+        userMsg = t.permissionDeniedMsg;
       }
       
       setError(userMsg);
@@ -177,15 +179,15 @@ export function RegistrationForm({ onSuccess }: Props) {
           </div>
         </div>
         <h1 id="app-title" className="text-5xl font-black text-[#2D5A27] dark:text-[#4ADE80] tracking-tighter pt-4 font-display uppercase italic transition-colors duration-300">
-          Kupon Kurban
+          {t.couponTitle}
         </h1>
         <p id="mosque-name" className="text-lg font-bold text-[#2D5A27]/70 dark:text-[#4ADE80]/70 uppercase tracking-widest transition-colors duration-300">
-          {settings?.mosqueName || "Masjid Baiturrahman"}
+          {settings?.mosqueName || t.defaultMosqueName}
         </p>
         {isOutOfStock && (
           <div className="bg-red-600 text-white p-6 rounded-[30px] shadow-2xl mt-6 animate-pulse rotate-1">
             <p className="font-black text-2xl uppercase tracking-tighter leading-none">
-              MOHON MAAF KUPON TELAH HABIS APABILA ADA KESALAHAN HUBUNGI PANITIA SETEMPAT dan segera konfirmasi
+              {t.outOfStockMsg}
             </p>
           </div>
         )}
@@ -195,13 +197,13 @@ export function RegistrationForm({ onSuccess }: Props) {
         <form id="warga-form" onSubmit={handleSubmit} className="space-y-6 bg-white dark:bg-[#1E1E1E] p-8 rounded-[40px] shadow-2xl border-4 border-[#2D5A27] dark:border-[#4ADE80] transition-colors duration-300">
           <div className="space-y-2">
             <label id="label-nama" htmlFor="nama" className="text-xl font-bold text-[#2D5A27] dark:text-[#4ADE80] block transition-colors duration-300">
-              NAMA LENGKAP
+              {t.labelName}
             </label>
             <input
               id="input-nama"
               autoFocus
               type="text"
-              placeholder="TULIS NAMA ANDA..."
+              placeholder={t.placeholderName}
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full bg-[#F5F5F0] dark:bg-[#121212] border-4 border-[#2D5A27]/20 dark:border-[#4ADE80]/20 rounded-2xl p-6 text-2xl font-black focus:border-[#2D5A27] dark:focus:border-[#4ADE80] focus:ring-0 outline-none transition-all placeholder:text-[#2D5A27]/30 dark:placeholder:text-[#4ADE80]/30 uppercase text-[#2D5A27] dark:text-[#4ADE80]"
@@ -210,12 +212,12 @@ export function RegistrationForm({ onSuccess }: Props) {
 
           <div className="space-y-2">
             <label id="label-hp" htmlFor="hp" className="text-xl font-bold text-[#2D5A27] dark:text-[#4ADE80] block transition-colors duration-300">
-              NOMOR HP / WHATSAPP
+              {t.labelPhone}
             </label>
             <input
               id="input-hp"
               type="tel"
-              placeholder="08XXXXXXXXXX"
+              placeholder={t.placeholderPhone}
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               className="w-full bg-[#F5F5F0] dark:bg-[#121212] border-4 border-[#2D5A27]/20 dark:border-[#4ADE80]/20 rounded-2xl p-6 text-2xl font-black focus:border-[#2D5A27] dark:focus:border-[#4ADE80] focus:ring-0 outline-none transition-all placeholder:text-[#2D5A27]/30 dark:placeholder:text-[#4ADE80]/30 text-[#2D5A27] dark:text-[#4ADE80]"
@@ -224,11 +226,11 @@ export function RegistrationForm({ onSuccess }: Props) {
 
           <div className="space-y-2">
             <label id="label-alamat" htmlFor="alamat" className="text-xl font-bold text-[#2D5A27] dark:text-[#4ADE80] block transition-colors duration-300">
-              ALAMAT RUMAH
+              {t.labelAddress}
             </label>
             <textarea
               id="input-alamat"
-              placeholder="Tulis alamat rumah anda..."
+              placeholder={t.placeholderAddress}
               rows={3}
               value={address}
               onChange={(e) => setAddress(e.target.value)}
@@ -248,17 +250,17 @@ export function RegistrationForm({ onSuccess }: Props) {
             type="submit"
             className="w-full bg-[#4CAF50] dark:bg-[#2D5A27] hover:bg-[#43A047] dark:hover:bg-[#1B3618] active:scale-95 disabled:opacity-50 text-white rounded-3xl p-6 text-2xl font-black shadow-[0_8px_0_#2D5A27] dark:shadow-[0_8px_0_#121212] transition-all"
           >
-            {loading ? 'MEMPROSES...' : 'AMBIL NOMOR ANTRIAN'}
+            {loading ? t.processing : t.getQueueNumber}
           </button>
         </form>
       ) : (
         <div className="bg-white dark:bg-[#1E1E1E] p-8 rounded-[40px] shadow-2xl border-4 border-red-600 flex flex-col items-center gap-6 text-center animate-pulse transition-colors duration-300">
             <AlertCircle className="w-24 h-24 text-red-600" />
             <h2 className="text-4xl font-black text-red-600 uppercase tracking-tighter leading-none">
-              MOHON MAAF KUPON TELAH HABIS APABILA ADA KESALAHAN HUBUNGI PANITIA SETEMPAT dan segera konfirmasi
+              {t.outOfStockMsg}
             </h2>
             <p className="font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest text-sm">
-              Sistem Otomatis Menutup Pendaftaran
+              {t.autoClosingReg}
             </p>
         </div>
       )}
@@ -268,7 +270,7 @@ export function RegistrationForm({ onSuccess }: Props) {
           <Settings className="w-8 h-8" />
         </div>
         <div>
-          <p className="font-bold text-lg uppercase leading-tight">Maksimal Kupon: {settings?.maxCoupons || '...'}</p>
+          <p className="font-bold text-lg uppercase leading-tight">{t.maxCouponLabel}: {settings?.maxCoupons || '...'}</p>
           <p className="text-white/70 text-sm">{settings?.mosqueAddress || '...'}</p>
         </div>
       </div>
