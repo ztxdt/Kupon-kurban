@@ -73,7 +73,7 @@ export function AdminLogin({ onLoginSuccess, onBack }: Props) {
       
       let msg = 'Gagal login Google.';
       if (err.code === 'auth/unauthorized-domain') {
-        msg = 'DOMAIN TIDAK TEROTORISASI: Mohon tambahkan domain ini ke list "Authorized domains" di Firebase Console (Authentication > Settings).';
+        msg = `DOMAIN TIDAK TEROTORISASI: Mohon tambahkan domain '${window.location.hostname}' ke list "Authorized domains" di Firebase Console (Authentication > Settings > Authorized domains).`;
       } else if (err.code === 'auth/popup-blocked') {
         msg = 'POPUP DIBLOKIR: Mohon izinkan popup untuk website ini di browser Anda.';
       } else if (err.code === 'auth/popup-closed-by-user') {
